@@ -160,7 +160,112 @@ function renderMarkdown(text) {
     a.title = a.href;
   });
   decorate(wrap);
+  structure(wrap, text);
   return wrap;
+}
+
+// Makes long replies (full audits) scannable: a scorecard on top, each
+// section collapsed to one row with its count, and long tables trimmed.
+const LONG_REPLY = 700;
+const TABLE_PREVIEW_ROWS = 5;
+
+function structure(wrap, text) {
+  wrap.querySelectorAll('table').forEach(trimTable);
+  if (text.length < LONG_REPLY) return;
+
+  // Agents often use a bold line instead of a heading: treat it as one.
+  for (const p of wrap.querySelectorAll(':scope > p')) {
+    const only = p.childNodes.length === 1 && p.firstChild.nodeName === 'STRONG';
+    const t = p.textContent.trim().replace(/:$/, '');
+    if (only && t.length <= 80) { const h = el('h3', '', esc(t)); h.dataset.pseudo = '1'; p.replaceWith(h); }
+  }
+
+  // The scorecard shows the score, so drop a standalone "Compliance score: 48/100" line.
+  for (const p of wrap.querySelectorAll(':scope > p')) {
+    if (/^\s*(compliance\s+)?score\b[^\n]{0,30}$/i.test(p.textContent) && detectScore(p.textContent)) p.remove();
+  }
+
+  // A closing offer ("If you want, I can rewrite…") stays visible below the sections.
+  const lastNode = wrap.lastElementChild;
+  const closing = lastNode && lastNode.tagName === 'P' ? lastNode : null;
+  closing?.remove();
+
+  const heads = [...wrap.querySelectorAll(':scope > h1, :scope > h2, :scope > h3, :scope > h4')];
+  if (heads.length >= 2) {
+    // Section level = the most common real heading level (bold-line headings
+    // count as peers of it); bigger headings stay as titles.
+    const counts = {};
+    heads.filter(h => !h.dataset.pseudo).forEach(h => { counts[h.tagName] = (counts[h.tagName] || 0) + 1; });
+    const level = Object.entries(counts).sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))[0]?.[0] || 'H3';
+    const rank = (tag) => Number(tag[1]);
+    let current = null, first = true;
+    for (const node of [...wrap.childNodes]) {
+      const isHead = node.nodeType === 1 && /^H[1-4]$/.test(node.tagName);
+      if (isHead && (node.tagName === level || node.dataset.pseudo)) {
+        current = el('details', 'section');
+        if (first) { current.open = true; first = false; }
+        const sum = el('summary', '', `<span class="section-title">${node.innerHTML}</span><span class="section-meta"></span>`);
+        current.appendChild(sum);
+        current.appendChild(el('div', 'section-body'));
+        node.replaceWith(current);
+      } else if (isHead && !node.dataset.pseudo && rank(node.tagName) < rank(level)) {
+        current = null;
+      } else if (current) {
+        current.lastChild.appendChild(node);
+      }
+    }
+    wrap.querySelectorAll('details.section').forEach(d => { d.querySelector('.section-meta').innerHTML = sectionMeta(d.lastChild); });
+  }
+
+  if (closing) wrap.appendChild(closing);
+  const card = scorecard(wrap, text);
+  if (card) wrap.prepend(card);
+}
+
+function sectionMeta(body) {
+  const sev = sevCounts(body);
+  const parts = ['critical', 'major', 'minor'].filter(k => sev[k]).map(k => `<span class="sev ${k}">${sev[k]} ${k}</span>`);
+  if (parts.length) return parts.join('');
+  const rows = body.querySelectorAll('tbody tr').length;
+  const items = body.querySelectorAll(':scope > ul > li, :scope > ol > li').length;
+  const n = rows || items;
+  return n ? `${n} ${rows ? 'rows' : n === 1 ? 'item' : 'items'}` : '';
+}
+
+function sevCounts(root) {
+  const c = { critical: 0, major: 0, minor: 0 };
+  root.querySelectorAll('.sev').forEach(b => { for (const k in c) if (b.classList.contains(k)) c[k]++; });
+  return c;
+}
+
+function scorecard(wrap, text) {
+  const score = detectScore(text);
+  const sev = sevCounts(wrap);
+  const rules = new Set(text.match(RULE_RE) || []).size;
+  if (!score && !sev.critical && !sev.major && !sev.minor) return null;
+  const bits = [];
+  if (score) {
+    const v = score.after, c = v >= 85 ? 'ok' : v >= 60 ? 'major' : 'critical';
+    bits.push(`<span class="sc-score ${c}"><b>${Math.round(v)}</b><small>/100</small></span>`);
+    if (score.before != null) bits.push(`<span class="sc-item">from ${score.before}</span>`);
+  }
+  for (const k of ['critical', 'major', 'minor']) if (sev[k]) bits.push(`<span class="sc-item"><i class="dot ${k}"></i>${sev[k]} ${k}</span>`);
+  if (rules) bits.push(`<span class="sc-item">${rules} rule${rules === 1 ? '' : 's'}</span>`);
+  return el('div', 'scorecard', bits.join(''));
+}
+
+function trimTable(table) {
+  const rows = [...table.querySelectorAll('tbody tr')];
+  if (rows.length <= TABLE_PREVIEW_ROWS + 1) return;
+  rows.slice(TABLE_PREVIEW_ROWS).forEach(r => r.classList.add('extra-row'));
+  table.classList.add('trimmed');
+  const btn = el('button', 'show-rows', `Show all ${rows.length} rows`);
+  btn.type = 'button';
+  btn.onclick = () => {
+    const open = table.classList.toggle('trimmed');
+    btn.textContent = open ? `Show all ${rows.length} rows` : 'Show fewer';
+  };
+  table.closest('.table-wrap').after(btn);
 }
 
 // Turns rule IDs into clickable chips and severity labels into badges.
