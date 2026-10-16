@@ -230,3 +230,12 @@ a.file-chip:hover { border-color: var(--accent); }
 .tool-step .ts-out { color: var(--muted); overflow-wrap: anywhere; }
 .tool-step .ts-note { flex-basis: 100%; color: var(--major); font-size: 12px; padding-left: 26px; }
 .chip.agent { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
+
+/* Start audit card */
+.dropzone { cursor: pointer; padding: 22px; }
+.dropzone .dz-text { flex: 1; min-width: 0; }
+.dropzone .start { flex: none; padding: 11px 20px; font-size: 15px; }
+@media (max-width: 760px) {
+  .dropzone { flex-wrap: wrap; }
+  .dropzone .start { width: 100%; justify-content: center; }
+}

@@ -9,20 +9,12 @@ const POLL_INTERVAL_MS = 1500;
 const POLL_TIMEOUT_MS = 180_000;
 const RULE_RE = /\bAMZ-[A-Z]+-\d{1,3}\b/g;
 
-const STARTERS = [
-  { tag: 'Audit', title: 'Audit PawJoy', desc: 'Dog chew toy · score, findings, fixes',
-    prompt: 'Audit the PawJoy dog chew toy listing against the Amazon content guidelines. Give me the compliance score, findings by field with rule ID and severity, and a suggested fix for each.' },
-  { tag: 'Audit', title: 'Audit FizzWave', desc: 'Sparkling water · score, findings, fixes',
-    prompt: 'Audit the FizzWave sparkling water listing against the Amazon content guidelines. Give me the compliance score, findings by field with rule ID and severity, and a suggested fix for each.' },
-  { tag: 'Benchmark', title: 'Compare with competitors', desc: 'Client vs competitor median on six measures',
-    prompt: 'Benchmark PawJoy against its 3 competitors: score, image count, headed bullets, description depth, and the themes competitors cover. Flag any risky claims competitors make.' },
-  { tag: 'Full flow', title: 'Audit → rewrite → sign-off', desc: 'Everything a brand manager needs to approve',
-    prompt: 'Run the full flow for FizzWave: audit, competitor benchmark, a compliant rewrite of the title, bullets and description with a rule ID on every change, the verified score before and after, the confirm-with-brand list, and the image plan.' },
-];
+// The agent audits every SKU in the CSV, so there is one entry point.
+const AUDIT_PROMPT = 'Audit all listings in this CSV against the Amazon content guidelines. For each client SKU, give the compliance score, findings by field with rule ID and severity, a suggested fix for each, and how it compares with its competitor group.';
 
 const FOLLOWUPS = [
-  { label: 'Show the compliant rewrite', prompt: 'Show the compliant rewrite of the title, 5 bullets and description, with the rule ID for each change.' },
-  { label: 'Benchmark vs competitors', prompt: 'How does this listing compare with its competitors? Show the client against the competitor median.' },
+  { label: 'Show the compliant rewrite', prompt: 'Show the compliant rewrite of the title, 5 bullets and description for each client SKU, with the rule ID for each change.' },
+  { label: 'Benchmark vs competitors', prompt: 'How does each client SKU compare with its competitors? Show each client against its competitor median.' },
   { label: 'Score before → after', prompt: 'Re-score the rewrite with the rule engine and show the score before and after.' },
   { label: 'What to confirm with the brand', prompt: 'List the facts the rewrite needs but the data does not hold, so I can confirm them with the brand.' },
   { label: 'Image plan', prompt: 'Give me the image plan: the shots needed to reach 5–7 images.' },
@@ -264,9 +256,10 @@ function renderAttachment() {
   box.classList.toggle('hidden', !f);
   const dz = $('#dropzone');
   dz.classList.toggle('has-file', !!f);
+  $('#dropzoneTitle').textContent = f ? `${f.name} · ${f.rows} listings` : 'Drop your listings CSV here';
   $('#dropzoneSub').textContent = f
-    ? `${f.name} · ${f.rows} listings attached. Pick a flow below or ask anything.`
-    : 'Drop it here or click to choose · title, bullets, description, image URLs, is_client, competitor_group';
+    ? 'Ready. Start the audit, or type your own question below.'
+    : 'Columns: sku_id, is_client, competitor_group, title, bullet_1–5, description, image_urls';
   if (f) box.appendChild(fileChip(f.name, `${f.rows} listings`, () => { state.file = null; renderAttachment(); }));
 }
 
@@ -681,15 +674,10 @@ function newChat() {
 function closeDrawers() { $('#app').classList.remove('sidebar-open', 'panel-open'); }
 
 function init() {
-  const starters = $('#starters');
-  for (const s of STARTERS) {
-    const b = el('button', 'starter', `<span class="tag">${esc(s.tag)}</span><b>${esc(s.title)}</b><span>${esc(s.desc)}</span>`);
-    // Audits need data: ask for the CSV first if none is attached yet.
-    b.onclick = () => (state.file || state.hasData ? send(s.prompt) : pickFile(s.prompt));
-    starters.appendChild(b);
-  }
-
-  $('#dropzone').onclick = () => pickFile();
+  const startAudit = () => (state.file ? send(AUDIT_PROMPT) : pickFile(AUDIT_PROMPT));
+  $('#startAudit').onclick = (e) => { e.stopPropagation(); startAudit(); };
+  $('#dropzone').onclick = startAudit;
+  $('#dropzone').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startAudit(); } };
   $('#attach').onclick = () => pickFile();
   $('#fileInput').addEventListener('change', e => attachFile(e.target.files[0]));
   // Drag a CSV anywhere onto the chat.
@@ -701,6 +689,7 @@ function init() {
   main.addEventListener('drop', e => {
     e.preventDefault(); depth = 0;
     main.classList.remove('dragging'); $('#composer').classList.remove('dragging');
+    if (!state.conversationId && !state.busy) state.pendingPrompt = AUDIT_PROMPT;
     attachFile(e.dataTransfer.files[0]);
   });
 
