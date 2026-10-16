@@ -728,6 +728,7 @@ async function loadHistory() {
 }
 
 async function openConversation(id, title) {
+  showChat();
   if (state.busy) state.abort?.abort();
   reset();
   state.conversationId = id;
@@ -789,7 +790,10 @@ function reset() {
   renderFollowups();
 }
 
+function showChat() { $('#app').classList.remove('pf-mode'); }
+
 function newChat() {
+  showChat();
   if (state.busy) state.abort?.abort();
   reset();
   try { localStorage.removeItem('ally.conversation'); } catch { /* ignore */ }
@@ -804,12 +808,16 @@ function newChat() {
 function closeDrawers() { $('#app').classList.remove('sidebar-open', 'panel-open'); }
 
 function init() {
-  const startAudit = () => (state.file ? send(AUDIT_PROMPT) : pickFile(AUDIT_PROMPT));
+  const startAudit = () => { state.pendingPortfolio = true; $('#fileInput').value = ''; $('#fileInput').click(); };
   $('#startAudit').onclick = (e) => { e.stopPropagation(); startAudit(); };
   $('#dropzone').onclick = startAudit;
   $('#dropzone').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startAudit(); } };
   $('#attach').onclick = () => pickFile();
-  $('#fileInput').addEventListener('change', e => attachFile(e.target.files[0]));
+  $('#fileInput').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (state.pendingPortfolio) { state.pendingPortfolio = false; if (file) window.Portfolio?.openFile(file); return; }
+    attachFile(file);
+  });
   // Drag a CSV anywhere onto the chat.
   const main = $('.main');
   let depth = 0;
@@ -819,8 +827,9 @@ function init() {
   main.addEventListener('drop', e => {
     e.preventDefault(); depth = 0;
     main.classList.remove('dragging'); $('#composer').classList.remove('dragging');
-    if (!state.conversationId && !state.busy) state.pendingPrompt = AUDIT_PROMPT;
-    attachFile(e.dataTransfer.files[0]);
+    const file = e.dataTransfer.files[0];
+    if (!state.conversationId && !state.busy && !$('#app').classList.contains('pf-mode')) return window.Portfolio?.openFile(file);
+    attachFile(file);
   });
 
   const input = $('#input');
@@ -848,7 +857,7 @@ function init() {
   // Rule chips anywhere → ask about that rule.
   document.addEventListener('click', e => {
     const r = e.target.closest('[data-rule]');
-    if (!r) return;
+    if (!r || r.closest('#portfolio')) return;
     closeDrawers();
     send(`Explain rule ${r.dataset.rule}: what it requires, where this listing breaks it, and the compliant fix.`);
   });
@@ -992,3 +1001,9 @@ function imageCard(img) {
   card.appendChild(info);
   return card;
 }
+
+// Helpers shared with the portfolio view (portfolio.js).
+window.Ally = {
+  api, findKey, ID_KEYS, findMessages, toTurns, extractReply, uploadLink, csvLink, parseCsv, detectScore,
+  RULE_RE, esc, el, openConversation, saveTitle, imageCard, statusIcon, closeDrawers, loadHistory,
+};
