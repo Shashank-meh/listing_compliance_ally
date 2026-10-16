@@ -270,7 +270,22 @@ function renderAttachment() {
   if (f) box.appendChild(fileChip(f.name, `${f.rows} listings`, () => { state.file = null; renderAttachment(); }));
 }
 
-// Packs the CSV into a URL on this site (gzip + base64url) that serves it back
+// Preferred: store the CSV and get a short URL the agent can copy reliably.
+// Returns null when storage isn't set up, so the caller falls back to csvLink.
+async function uploadLink(f) {
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name, text: f.text }) });
+    if (res.status === 501 || res.status === 404) return null;
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.url) throw new Error(body.error || `Upload failed (${res.status})`);
+    return body.url;
+  } catch (err) {
+    console.warn('CSV upload failed, using inline link instead:', err);
+    return null;
+  }
+}
+
+// Fallback: packs the CSV into a URL on this site (gzip + base64url) that serves it back
 // as text/csv, so the agent's ingest step can fetch it like any hosted file.
 const MAX_LINK_CHARS = 12_000;
 async function csvLink(f) {
@@ -459,7 +474,7 @@ async function send(text) {
   if (state.file) {
     const f = state.file;
     let url;
-    try { url = await csvLink(f); } catch (e) { return toast(e.message); }
+    try { url = await uploadLink(f) || await csvLink(f); } catch (e) { return toast(e.message); }
     text += `\n\nListings CSV (${f.name}, ${f.rows} rows), use as csv_url: ${url}`;
     state.file = null;
     state.hasData = true;

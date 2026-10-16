@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Chat UI for the Listing Compliance Ally agent on SimplAI",
-  "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=18" }
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.8.0"
+  }
 }

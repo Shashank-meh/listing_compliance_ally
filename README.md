@@ -26,6 +26,14 @@ change names its rule.
    | `SIMPLAI_BASE_URL` | optional, defaults to `https://edge-service.simplai.ai` |
 
 3. Deploy. Every push to `main` redeploys automatically.
+4. **Connect file storage** (needed for CSV audits): in the project, open **Storage → Create → Blob**, create a
+   store and connect it to this project. Vercel adds `BLOB_READ_WRITE_TOKEN` for you; redeploy once.
+
+### How attached CSVs reach the agent
+The agent's `audit-file` tool takes a `csv_url`. When you attach a CSV, the app uploads it to Vercel Blob and
+sends the agent a short public URL (`…/csv/<hash>-listings.csv`). Without Blob storage the app falls back to a
+self-contained link (`/f/<gzip+base64>/listings.csv`), which works but is long enough that the model may
+mis-copy it.
 
 The API key lives only in Vercel's environment; the browser talks to `/api/*` functions, never to SimplAI directly.
 
@@ -43,6 +51,8 @@ Open http://localhost:5173.
 | `GET /api/poll` | `GET /interact/api/v1/intract/conversation/fetchDetails` (polled every 1.5 s until `message_status` is `2`, up to 3 min) |
 | `GET /api/conversations` | `GET /interact/api/ve1/intract/conversation` |
 | `GET /api/conversation?id=` | `GET /interact/api/ve1/intract/conversation/{id}` |
+| `POST /api/upload` | Vercel Blob (stores attached CSVs) |
+| `GET /f/<data>/<name>.csv` | Serves a CSV packed into the URL (fallback) |
 
 - `lib/simplai.js` — SimplAI client, shared by both runtimes
 - `api/*.js` — Vercel serverless functions
