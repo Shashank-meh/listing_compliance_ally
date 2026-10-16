@@ -423,6 +423,7 @@ const RULE_GROUPS = { TITLE: 'Title', BULLET: 'Bullets', BUL: 'Bullets', DESC: '
 
 function renderPanel() {
   const hasScore = Boolean(state.score), hasRules = state.ruleCounts.size > 0;
+  $('#app').classList.toggle('has-summary', hasScore || hasRules);
   $('#panelEmpty').classList.toggle('hidden', hasScore || hasRules);
   $('#scoreSection').classList.toggle('hidden', !hasScore);
   $('#rulesSection').classList.toggle('hidden', !hasRules);
@@ -458,18 +459,27 @@ function renderPanel() {
   }
 }
 
+// Next-step suggestions sit in the thread, right under Ally's latest reply.
 function renderFollowups() {
-  const box = $('#followups');
-  box.innerHTML = '';
+  $('#followups')?.remove();
   if (!state.conversationId || state.busy) return;
   const agent = (state.agentFollowups || []).map(t => ({ label: t, prompt: t, agent: true }));
   const ours = FOLLOWUPS.filter(f => !state.asked.has(f.prompt));
-  for (const f of [...agent, ...ours].slice(0, 4)) {
+  const items = [...agent, ...ours].slice(0, 4);
+  if (!items.length) return;
+  const box = el('div', 'suggestions');
+  box.id = 'followups';
+  box.appendChild(el('div', 'suggestions-label', 'Suggested next steps'));
+  const row = el('div', 'suggestion-row');
+  for (const f of items) {
     const c = el('button', f.agent ? 'chip agent' : 'chip', esc(f.label));
     if (f.agent) c.title = 'Suggested by Ally';
     c.onclick = () => send(f.prompt);
-    box.appendChild(c);
+    row.appendChild(c);
   }
+  box.appendChild(row);
+  $('#thread').appendChild(box);
+  scrollDown();
 }
 
 // ---------- chat flow ----------
@@ -699,6 +709,7 @@ function init() {
   });
 
   const input = $('#input');
+  if (matchMedia('(max-width: 760px)').matches) input.placeholder = 'Ask Ally…';
   const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; };
   input.addEventListener('input', grow);
   input.addEventListener('keydown', e => {

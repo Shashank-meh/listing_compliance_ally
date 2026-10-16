@@ -259,3 +259,56 @@ a.file-chip:hover { border-color: var(--accent); }
 /* Follow-ups wrap instead of running off the edge */
 .followups { flex-wrap: wrap; overflow: visible; }
 .hint { font-size: 11.5px; }
+
+/* ---- Minimal layout ---- */
+/* Summary panel only appears once an audit has produced a score or rules. */
+.app, .app.has-summary { grid-template-columns: 248px minmax(0, 1fr); }
+.app .panel { display: none; }
+.app.has-summary .panel { display: block; }
+@media (min-width: 1181px) { .app.has-summary { grid-template-columns: 248px minmax(0, 1fr) 288px; } }
+@media (max-width: 760px) { .app, .app.has-summary { grid-template-columns: minmax(0, 1fr); } }
+#togglePanel { display: none !important; }
+.app.has-summary #togglePanel { display: inline-grid !important; }
+@media (min-width: 1181px) { .app.has-summary #togglePanel { display: none !important; } }
+
+/* Lighter sidebar */
+.sidebar { background: var(--bg); padding: 14px 10px; }
+.brand { padding: 4px 6px 14px; }
+.logo { width: 30px; height: 30px; border-radius: 9px; }
+.brand-sub { display: none; }
+.new-chat { background: var(--surface); color: var(--text); border-color: var(--border); font-weight: 550; }
+.new-chat:hover { border-color: var(--accent); color: var(--accent-text); filter: none; }
+.side-label { margin-top: 16px; }
+.history button { padding: 7px 10px; }
+
+/* Quieter top bar and panel */
+.topbar { background: transparent; border-bottom-color: transparent; min-height: 52px; }
+.topbar-title { font-weight: 550; color: var(--muted); font-size: 13.5px; }
+.panel { background: var(--bg); }
+.panel-section:first-of-type { border-top: 0; }
+
+/* Ally's replies read as plain text, not boxed cards */
+.msg.bot .card { background: none; border: 0; box-shadow: none; padding: 3px 0 0; border-radius: 0; }
+.msg { margin-bottom: 26px; }
+.avatar { width: 26px; height: 26px; border-radius: 8px; }
+
+/* In-chat suggestions */
+.suggestions { margin: -8px auto 24px; padding-left: 38px; }
+.suggestions-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.suggestion-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.suggestion-row .chip { font-size: 13px; }
+@media (max-width: 760px) { .suggestions { padding-left: 0; } }
+
+/* Simpler start screen */
+.welcome { padding-top: 8vh; }
+.steps { opacity: .8; }
+
+@media (max-width: 760px) {
+  .welcome { padding-top: 2vh; }
+  .welcome > p { font-size: 14px; }
+  .steps { display: none; }
+  .dropzone { padding: 16px; gap: 12px; }
+  .dropzone > svg { display: none; }
+  #dropzoneSub { display: none; }
+}
+@media (max-width: 760px) { .md table { min-width: 560px; } .md .sev, .md .rule { white-space: nowrap; } }
