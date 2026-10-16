@@ -390,15 +390,32 @@ function absorb(text) {
   renderPanel();
 }
 
+// Finds the compliance score in a reply. Handles "Compliance score: 41/100",
+// "**Score:** 41", "41 out of 100", "0.41", table rows like "| Score | 41 |",
+// and before/after forms ("41 → 88", "from 41 to 88", "before 41 … after 88").
 function detectScore(text) {
-  const num = '(\\d{1,3}(?:\\.\\d+)?)\\s*(?:%|/\\s*100)?';
-  const pair = new RegExp(`score[^\\n]{0,40}?${num}[^\\n\\d]{0,20}?(?:→|->|➜|to)\\s*${num}`, 'i');
-  const single = new RegExp(`score[^\\n\\d]{0,30}?(\\d{1,3}(?:\\.\\d+)?)\\s*(%|/\\s*100)`, 'i');
-  const ok = n => n >= 0 && n <= 100;
-  let m = text.match(pair);
-  if (m && ok(+m[1]) && ok(+m[2])) return { before: +m[1], after: +m[2] };
-  m = text.match(single);
-  if (m && ok(+m[1])) return { after: +m[1] };
+  const plain = text.replace(/\*\*|__|`/g, '');
+  const NUM = String.raw`(\d{1,3}(?:\.\d+)?)\s*(?:%|/\s*100|out of 100|pts|points)?`;
+  const toPct = (v) => { let n = parseFloat(v); if (n > 0 && n <= 1 && /\./.test(v)) n *= 100; return n >= 0 && n <= 100 ? Math.round(n * 10) / 10 : null; };
+  // Lines that state a score, compliance score lines first.
+  // A heading like "### Compliance score" may have its number on the next line.
+  const all = plain.split('\n');
+  const lines = all.flatMap((l, i) => {
+    if (!/score/i.test(l)) return [];
+    if (/\d/.test(l)) return [l];
+    const next = all.slice(i + 1).find(x => x.trim());
+    return next ? [`${l} ${next}`] : [];
+  });
+  lines.sort((a, b) => /compliance/i.test(b) - /compliance/i.test(a));
+  for (const line of lines) {
+    const after = line.slice(line.search(/score/i));
+    const pair = after.match(new RegExp(String.raw`(?:from\s+|before\D{0,15})?${NUM}[^\d\n]{0,25}?(?:→|->|➜|⇒|\bto\b|after\D{0,15})\s*${NUM}`, 'i'));
+    if (pair) { const a = toPct(pair[1]), b = toPct(pair[2]); if (a != null && b != null) return { before: a, after: b }; }
+    const one = after.match(new RegExp(String.raw`scores?\b[^\d\n]{0,40}?${NUM}`, 'i'));
+    if (one && !/^\s*(rules?|findings?|issues?|skus?|listings?|images?)\b/i.test(after.slice(one.index + one[0].length))) {
+      const v = toPct(one[1]); if (v != null) return { after: v };
+    }
+  }
   return null;
 }
 
