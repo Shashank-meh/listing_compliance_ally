@@ -82,27 +82,25 @@
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
         </form>
-        <div class="hint muted small">Attach or drop a listings CSV · Enter to send · Shift+Enter for a new line · Rewrites need brand sign-off before publishing</div>
+        <div class="hint muted small">Rewrites need brand sign-off before publishing</div>
       </div>
     </main>
 
     <!-- Right panel: what's been cited in this conversation -->
     <aside class="panel" id="panel">
       <div class="panel-head">
-        <h2>Audit panel</h2>
+        <h2>Audit summary</h2>
         <button class="icon-btn only-mobile" id="closePanel" aria-label="Close">✕</button>
       </div>
-      <div class="panel-section" id="scoreSection">
+      <div class="panel-empty muted small" id="panelEmpty">Run an audit to see the compliance score and the rules each finding cites.</div>
+      <div class="panel-section hidden" id="scoreSection">
         <h3>Compliance score</h3>
-        <div id="scoreBox" class="muted small">Appears when Ally reports a score.</div>
+        <div id="scoreBox"></div>
       </div>
-      <div class="panel-section">
+      <div class="panel-section hidden" id="rulesSection">
         <h3>Rules cited <span class="count" id="ruleCount">0</span></h3>
-        <div id="rules" class="rules muted small">Rule IDs Ally cites (e.g. AMZ-TITLE-04) collect here. Click one to ask about it.</div>
-      </div>
-      <div class="panel-section">
-        <h3>Next steps</h3>
-        <div class="actions" id="panelActions"></div>
+        <div id="rules" class="rules"></div>
+        <p class="muted small panel-tip">Click a rule to ask Ally about it.</p>
       </div>
     </aside>
   </div>

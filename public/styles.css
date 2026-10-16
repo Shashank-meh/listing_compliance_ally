@@ -239,3 +239,23 @@ a.file-chip:hover { border-color: var(--accent); }
   .dropzone { flex-wrap: wrap; }
   .dropzone .start { width: 100%; justify-content: center; }
 }
+
+/* Review sheet button */
+.md a.sheet-link { display: inline-flex; align-items: center; gap: 8px; margin: 2px 0; padding: 7px 12px; border-radius: 10px; background: var(--ok-bg); color: var(--ok); font-weight: 600; text-decoration: none; border: 1px solid transparent; }
+.md a.sheet-link:hover { border-color: var(--ok); }
+.md a.sheet-link .sheet-icon { display: inline-grid; }
+
+/* Cleaner audit summary */
+.panel-empty { padding: 14px 0; border-top: 1px solid var(--border); }
+.rules { gap: 12px; }
+.rule-group { margin: 0; font-weight: 400; }
+.rule-group-name { font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.rule-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rule-chips .rule { font-size: 11.5px; padding: 2px 8px; }
+.rule .n { margin-left: 5px; opacity: .65; font-weight: 500; }
+.panel-tip { margin: 12px 0 0; }
+.score-delta b { font-size: 14px; }
+
+/* Follow-ups wrap instead of running off the edge */
+.followups { flex-wrap: wrap; overflow: visible; }
+.hint { font-size: 11.5px; }

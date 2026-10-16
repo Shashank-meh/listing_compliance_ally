@@ -153,6 +153,12 @@ function renderMarkdown(text) {
   const wrap = el('div', 'md', html);
   wrap.querySelectorAll('table').forEach(t => { const w = el('div', 'table-wrap'); t.replaceWith(w); w.appendChild(t); });
   wrap.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+  // Google Sheets links (the rewrite review sheet) become a clear button.
+  wrap.querySelectorAll('a[href*="docs.google.com/spreadsheets"]').forEach(a => {
+    a.className = 'sheet-link';
+    a.innerHTML = '<span class="sheet-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg></span><span>Open review sheet</span><span aria-hidden="true">↗</span>';
+    a.title = a.href;
+  });
   decorate(wrap);
   return wrap;
 }
@@ -217,7 +223,8 @@ function addUser(text) {
     const [name, size] = csv[1].split(',').map(s => s.trim());
     stack.appendChild(fileChip(name || 'listings.csv', size || (block ? `${csvRows(block[2])} rows` : ''), null, link ? link[2] : null));
   }
-  if (shown) stack.appendChild(el('div', 'bubble')).textContent = shown;
+  // The Start audit instruction is long; show it as a short label.
+  if (shown) stack.appendChild(el('div', 'bubble')).textContent = shown === AUDIT_PROMPT ? 'Audit all listings in this CSV' : shown;
   m.appendChild(stack);
   $('#thread').appendChild(m);
   scrollDown();
@@ -412,46 +419,42 @@ function detectScore(text) {
   return null;
 }
 
+const RULE_GROUPS = { TITLE: 'Title', BULLET: 'Bullets', BUL: 'Bullets', DESC: 'Description', IMG: 'Images', RESTRICT: 'Restricted claims', KW: 'Keywords' };
+
 function renderPanel() {
-  const box = $('#scoreBox');
-  if (state.score) {
+  const hasScore = Boolean(state.score), hasRules = state.ruleCounts.size > 0;
+  $('#panelEmpty').classList.toggle('hidden', hasScore || hasRules);
+  $('#scoreSection').classList.toggle('hidden', !hasScore);
+  $('#rulesSection').classList.toggle('hidden', !hasRules);
+
+  if (hasScore) {
     const { before, after } = state.score;
     const c = after >= 85 ? 'var(--ok)' : after >= 60 ? 'var(--major)' : 'var(--crit)';
-    const delta = before != null ? `<div class="score-delta">${before} → <b>${after}</b><br><span class="muted small">${after - before >= 0 ? '+' : ''}${Math.round((after - before) * 10) / 10} pts after rewrite</span></div>`
-      : `<div class="score-delta"><b>${after}</b> / 100<br><span class="muted small">Latest reported score</span></div>`;
-    box.className = 'score';
-    box.innerHTML = `<div class="gauge" style="--v:${after};--c:${c}"><span>${Math.round(after)}</span></div>${delta}`;
-  } else {
-    box.className = 'muted small';
-    box.textContent = 'Appears when Ally reports a score.';
+    const label = after >= 85 ? 'Good' : after >= 60 ? 'Needs work' : 'At risk';
+    const detail = before != null
+      ? `<span class="muted small">Was ${before} · ${after - before >= 0 ? '+' : ''}${Math.round((after - before) * 10) / 10} after rewrite</span>`
+      : `<span class="muted small">out of 100</span>`;
+    $('#scoreBox').className = 'score';
+    $('#scoreBox').innerHTML = `<div class="gauge" style="--v:${after};--c:${c}"><span>${Math.round(after)}</span></div><div class="score-delta"><b style="color:${c}">${label}</b><br>${detail}</div>`;
   }
 
-  const rules = $('#rules');
   $('#ruleCount').textContent = state.ruleCounts.size;
-  if (!state.ruleCounts.size) {
-    rules.className = 'rules muted small';
-    rules.textContent = 'Rule IDs Ally cites (e.g. AMZ-TITLE-04) collect here. Click one to ask about it.';
-  } else {
-    rules.className = 'rules';
-    rules.innerHTML = '';
-    const groups = {};
-    for (const [id, n] of state.ruleCounts) (groups[id.split('-')[1]] ||= []).push([id, n]);
-    for (const g of Object.keys(groups).sort()) {
-      rules.appendChild(el('div', 'rule-group', esc(g.charAt(0) + g.slice(1).toLowerCase())));
-      for (const [id, n] of groups[g].sort()) {
-        const row = el('button', 'rule-row', `<span class="rule" data-rule="${id}">${id}</span><span class="n">×${n}</span>`);
-        row.dataset.rule = id;
-        rules.appendChild(row);
-      }
+  const rules = $('#rules');
+  rules.innerHTML = '';
+  const groups = {};
+  for (const [id, n] of state.ruleCounts) (groups[id.split('-')[1]] ||= []).push([id, n]);
+  for (const g of Object.keys(groups).sort()) {
+    const box = el('div', 'rule-group');
+    box.appendChild(el('div', 'rule-group-name', esc(RULE_GROUPS[g] || g.charAt(0) + g.slice(1).toLowerCase())));
+    const chips = el('div', 'rule-chips');
+    for (const [id, n] of groups[g].sort()) {
+      const chip = el('button', 'rule', `${id.replace(/^AMZ-/, '')}${n > 1 ? `<span class="n">×${n}</span>` : ''}`);
+      chip.dataset.rule = id;
+      chip.title = `${id} · cited ${n}× · click to ask about it`;
+      chips.appendChild(chip);
     }
-  }
-
-  const acts = $('#panelActions');
-  acts.innerHTML = '';
-  for (const f of FOLLOWUPS.slice(0, 5)) {
-    const b = el('button', 'btn', esc(f.label));
-    b.onclick = () => { closeDrawers(); send(f.prompt); };
-    acts.appendChild(b);
+    box.appendChild(chips);
+    rules.appendChild(box);
   }
 }
 
@@ -461,7 +464,7 @@ function renderFollowups() {
   if (!state.conversationId || state.busy) return;
   const agent = (state.agentFollowups || []).map(t => ({ label: t, prompt: t, agent: true }));
   const ours = FOLLOWUPS.filter(f => !state.asked.has(f.prompt));
-  for (const f of [...agent, ...ours].slice(0, 5)) {
+  for (const f of [...agent, ...ours].slice(0, 4)) {
     const c = el('button', f.agent ? 'chip agent' : 'chip', esc(f.label));
     if (f.agent) c.title = 'Suggested by Ally';
     c.onclick = () => send(f.prompt);
@@ -491,7 +494,8 @@ async function send(text) {
     renderAttachment();
   }
   addUser(text);
-  const title = stripCsv(text);
+  const csvName = (text.match(CSV_LINK_RE) || text.match(CSV_BLOCK_RE))?.[1].split(',')[0].trim();
+  const title = stripCsv(text) === AUDIT_PROMPT ? `Audit · ${csvName || 'listings'}` : stripCsv(text);
   if (!state.conversationId) { state.pendingTitle = title; $('#chatTitle').textContent = title.length > 70 ? title.slice(0, 70) + '…' : title; }
   const view = addBot();
   await run(text, view);
@@ -586,7 +590,8 @@ async function loadHistory() {
       // SimplAI list items look like { cid, message, created_at: "16-10-2026 20:55:20", status }.
       const firstMsg = findKey(it, /^(title|name|summary|first_?message|conversation_?name)$/i) || extractUserText(it)
         || (typeof it.message === 'string' ? it.message : null);
-      const title = savedTitle(id) || (firstMsg && stripCsv(firstMsg)) || 'Untitled conversation';
+      const first = firstMsg && stripCsv(firstMsg);
+      const title = savedTitle(id) || (first === AUDIT_PROMPT ? 'Audit all listings' : first) || 'Untitled conversation';
       const date = parseDate(findKey(it, /^(createdAt|created_at|updatedAt|updated_at|created_on)$/i));
       const li = el('li');
       const b = el('button', id === state.conversationId ? 'active' : '',
