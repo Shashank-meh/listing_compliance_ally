@@ -196,3 +196,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .avatar { display: none; }
 }
 .app.sidebar-open ~ .scrim, .app.panel-open ~ .scrim { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 10; }
+
+/* CSV attachment */
+.dropzone { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; background: var(--surface); border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; color: var(--accent-text); }
+.dropzone:hover, .dragging .dropzone { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone > span { display: flex; flex-direction: column; color: var(--text); }
+.dropzone > span .muted { font-size: 12.5px; }
+.dropzone.has-file { border-style: solid; border-color: var(--ok); }
+.dropzone.has-file svg { color: var(--ok); }
+.attached { display: flex; gap: 8px; padding-bottom: 8px; }
+.file-chip { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px 6px 10px; font-size: 13px; max-width: 100%; }
+.file-chip .fi { flex: none; width: 26px; height: 26px; border-radius: 7px; background: var(--ok-bg); color: var(--ok); display: grid; place-items: center; font: 700 9px var(--mono); }
+.file-chip .fn { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-chip .fm { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.file-chip button { background: none; border: 0; color: var(--muted); padding: 2px 4px; border-radius: 6px; }
+.file-chip button:hover { background: var(--surface-2); color: var(--text); }
+.msg.user .stack { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 75%; }
+.msg.user .stack .bubble { max-width: 100%; }
+.msg.user .file-chip { background: var(--surface); }
+.composer .attach { align-self: center; margin-left: -6px; }
+.composer.dragging { border-color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 760px) { .msg.user .stack { max-width: 88%; } }

@@ -52,6 +52,10 @@
         <div class="welcome" id="welcome">
           <h1>Audit a listing against Amazon's content rules</h1>
           <p class="muted">Ally checks titles, bullets, descriptions and images against 29 cited rules, benchmarks against competitors, and drafts a compliant rewrite where every change names its rule.</p>
+          <button class="dropzone" id="dropzone" type="button">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+            <span><b>Start with your listings CSV</b><span class="muted" id="dropzoneSub">Drop it here or click to choose · title, bullets, description, image URLs, is_client, competitor_group</span></span>
+          </button>
           <div class="starters" id="starters"></div>
           <div class="steps">
             <div class="step"><span class="step-n">1</span><div><b>Audit</b><span>Rule engine scores every field</span></div></div>
@@ -64,7 +68,12 @@
 
       <div class="composer-wrap">
         <div class="followups" id="followups"></div>
+        <div class="attached hidden" id="attached"></div>
         <form class="composer" id="composer">
+          <input type="file" id="fileInput" accept=".csv,text/csv" hidden>
+          <button class="icon-btn attach" id="attach" type="button" title="Attach listings CSV" aria-label="Attach listings CSV">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l8-8"/></svg>
+          </button>
           <textarea id="input" rows="1" placeholder="Ask Ally to audit a SKU, compare competitors, or rewrite a listing…" autocomplete="off"></textarea>
           <button class="btn btn-primary send" id="send" type="submit" aria-label="Send">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -73,7 +82,7 @@
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
         </form>
-        <div class="hint muted small">Enter to send · Shift+Enter for a new line · Rewrites need brand sign-off before publishing</div>
+        <div class="hint muted small">Attach or drop a listings CSV · Enter to send · Shift+Enter for a new line · Rewrites need brand sign-off before publishing</div>
       </div>
     </main>
 

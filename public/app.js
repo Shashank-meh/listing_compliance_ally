@@ -155,12 +155,85 @@ function decorate(root) {
 function hideWelcome() { $('#welcome')?.classList.add('hidden'); }
 function scrollDown() { const t = $('#thread'); t.scrollTop = t.scrollHeight; }
 
+// The CSV travels inside the message text; in the thread it shows as a file chip.
+const CSV_BLOCK_RE = /\n*Listings CSV \(([^)]*)\):\n```csv\n([\s\S]*?)\n```\s*$/;
+
+function fileChip(name, meta, onRemove) {
+  const chip = el('div', 'file-chip', `<span class="fi">CSV</span><span class="fn">${esc(name)}</span><span class="fm">${esc(meta)}</span>`);
+  if (onRemove) {
+    const x = el('button', '', '✕'); x.type = 'button'; x.title = 'Remove'; x.onclick = onRemove;
+    chip.appendChild(x);
+  }
+  return chip;
+}
+
 function addUser(text) {
   hideWelcome();
   const m = el('div', 'msg user');
-  m.appendChild(el('div', 'bubble')).textContent = text;
+  const stack = el('div', 'stack');
+  const csv = text.match(CSV_BLOCK_RE);
+  const shown = csv ? text.slice(0, csv.index).trim() : text;
+  if (csv) {
+    const [name, size] = csv[1].split(',').map(s => s.trim());
+    stack.appendChild(fileChip(name || 'listings.csv', size || `${csvRows(csv[2])} rows`));
+  }
+  if (shown) stack.appendChild(el('div', 'bubble')).textContent = shown;
+  m.appendChild(stack);
   $('#thread').appendChild(m);
   scrollDown();
+}
+
+// ---------- CSV attachment ----------
+const MAX_CSV_BYTES = 300_000;
+
+function csvRows(text) {
+  // Count records, ignoring newlines inside quoted fields; minus the header.
+  let rows = 0, inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') inQ = !inQ;
+    else if (c === '\n' && !inQ) rows++;
+  }
+  if (text.length && !text.endsWith('\n')) rows++;
+  return Math.max(rows - 1, 0);
+}
+
+async function attachFile(file) {
+  if (!file) return;
+  if (!/\.csv$/i.test(file.name) && file.type !== 'text/csv') return toast(`${file.name} isn't a CSV file.`);
+  if (file.size > MAX_CSV_BYTES) return toast(`${file.name} is ${Math.round(file.size / 1024)} KB. Keep it under ${MAX_CSV_BYTES / 1000} KB, or split it by competitor group.`);
+  const text = (await file.text()).replace(/\r\n?/g, '\n').trim();
+  state.file = { name: file.name, text, rows: csvRows(text) };
+  renderAttachment();
+  if (state.pendingPrompt) { const p = state.pendingPrompt; state.pendingPrompt = null; send(p); }
+  else $('#input').focus();
+}
+
+function renderAttachment() {
+  const box = $('#attached');
+  box.innerHTML = '';
+  const f = state.file;
+  box.classList.toggle('hidden', !f);
+  const dz = $('#dropzone');
+  dz.classList.toggle('has-file', !!f);
+  $('#dropzoneSub').textContent = f
+    ? `${f.name} · ${f.rows} listings attached. Pick a flow below or ask anything.`
+    : 'Drop it here or click to choose · title, bullets, description, image URLs, is_client, competitor_group';
+  if (f) box.appendChild(fileChip(f.name, `${f.rows} listings`, () => { state.file = null; renderAttachment(); }));
+}
+
+function pickFile(thenPrompt) {
+  state.pendingPrompt = thenPrompt || null;
+  $('#fileInput').value = '';
+  $('#fileInput').click();
+}
+
+function toast(msg) {
+  const box = $('#attached');
+  box.classList.remove('hidden');
+  const t = el('div', 'file-chip error', esc(msg));
+  box.appendChild(t);
+  setTimeout(() => { t.remove(); if (!state.file) box.classList.add('hidden'); }, 5000);
 }
 
 const AVATAR = '<div class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l7 4v5c0 4.5-3 8-7 9-4-1-7-4.5-7-9V7z"/></svg></div>';
@@ -300,8 +373,16 @@ async function send(text) {
   text = text.trim();
   if (!text || state.busy) return;
   state.asked.add(text);
+  if (state.file) {
+    const f = state.file;
+    text += `\n\nListings CSV (${f.name}, ${f.rows} rows):\n\`\`\`csv\n${f.text}\n\`\`\``;
+    state.file = null;
+    state.hasData = true;
+    renderAttachment();
+  }
   addUser(text);
-  if (!state.conversationId) $('#chatTitle').textContent = text.length > 70 ? text.slice(0, 70) + '…' : text;
+  const title = text.replace(CSV_BLOCK_RE, '').trim();
+  if (!state.conversationId) $('#chatTitle').textContent = title.length > 70 ? title.slice(0, 70) + '…' : title;
   const view = addBot();
   await run(text, view);
 }
@@ -376,7 +457,7 @@ async function loadHistory() {
     for (const it of items) {
       const id = findKey(it, ID_KEYS.conv) || (it.id != null ? String(it.id) : null);
       if (!id) continue;
-      const title = findKey(it, /^(title|name|summary|first_?message|conversation_?name)$/i) || extractUserText(it) || 'Untitled conversation';
+      const title = findKey(it, /^(title|name|summary|first_?message|conversation_?name)$/i) || extractUserText(it)?.replace(CSV_BLOCK_RE, '').trim() || 'Untitled conversation';
       const dateRaw = findKey(it, /^(createdAt|created_at|updatedAt|updated_at|created_on)$/i);
       const date = dateRaw ? new Date(isNaN(dateRaw) ? dateRaw : Number(dateRaw)) : null;
       const li = el('li');
@@ -412,7 +493,7 @@ async function openConversation(id, title) {
     }
     for (const it of items) {
       const u = extractUserText(it);
-      if (u) { addUser(u); state.asked.add(u); }
+      if (u) { addUser(u); state.asked.add(u); if (CSV_BLOCK_RE.test(u)) state.hasData = true; }
       const reply = extractReply(it, u || '');
       if (reply) fillBot(addBot(), reply, it);
     }
@@ -428,6 +509,9 @@ function reset() {
   state.asked.clear();
   state.ruleCounts.clear();
   state.score = null;
+  state.hasData = false;
+  state.file = null;
+  renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
   renderPanel();
   renderFollowups();
@@ -451,9 +535,25 @@ function init() {
   const starters = $('#starters');
   for (const s of STARTERS) {
     const b = el('button', 'starter', `<span class="tag">${esc(s.tag)}</span><b>${esc(s.title)}</b><span>${esc(s.desc)}</span>`);
-    b.onclick = () => send(s.prompt);
+    // Audits need data: ask for the CSV first if none is attached yet.
+    b.onclick = () => (state.file || state.hasData ? send(s.prompt) : pickFile(s.prompt));
     starters.appendChild(b);
   }
+
+  $('#dropzone').onclick = () => pickFile();
+  $('#attach').onclick = () => pickFile();
+  $('#fileInput').addEventListener('change', e => attachFile(e.target.files[0]));
+  // Drag a CSV anywhere onto the chat.
+  const main = $('.main');
+  let depth = 0;
+  main.addEventListener('dragenter', e => { if (e.dataTransfer?.types.includes('Files')) { depth++; main.classList.add('dragging'); $('#composer').classList.add('dragging'); } });
+  main.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; main.classList.remove('dragging'); $('#composer').classList.remove('dragging'); } });
+  main.addEventListener('dragover', e => e.preventDefault());
+  main.addEventListener('drop', e => {
+    e.preventDefault(); depth = 0;
+    main.classList.remove('dragging'); $('#composer').classList.remove('dragging');
+    attachFile(e.dataTransfer.files[0]);
+  });
 
   const input = $('#input');
   const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; };
