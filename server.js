@@ -63,21 +63,41 @@ const routes = {
   'GET /api/conversation': 'conversation',
 };
 
+// Short CSV links. Matches both the public paths and the /api/* paths that
+// vercel.json rewrites them to, since Vercel may run this server directly.
+function csvLinkParams(url) {
+  const p = url.pathname, q = url.searchParams;
+  let m;
+  if ((m = p.match(/^\/c\/([^/]+)\/([^/]+)$/))) return { kind: 'stored', key: m[1], name: decodeURIComponent(m[2]) };
+  if ((m = p.match(/^\/f\/([^/]+)\/([^/]+)$/))) return { kind: 'inline', key: m[1], name: decodeURIComponent(m[2]) };
+  if (p === '/api/file') return { kind: 'stored', key: q.get('id'), name: q.get('name') };
+  if (p === '/api/csv') return { kind: 'inline', key: q.get('z'), name: q.get('name') };
+  return null;
+}
+
+async function serveCsvLink(req, res, link) {
+  const ua = req.headers['user-agent'] || 'unknown';
+  let csv = null;
+  try { csv = link.kind === 'stored' ? await readCsv(link.key) : decodeCsv(link.key); }
+  catch (err) { console.warn(`csv ${link.kind} link failed: ${err.message}`); }
+  if (csv == null) {
+    console.warn(`csv file not found: ${link.kind} ${String(link.key).slice(0, 24)} from ${ua}`);
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    return res.end('File not found');
+  }
+  console.log(`csv file served: ${link.name} (${csv.length} chars) to ${ua}`);
+  res.writeHead(200, csvHeaders(link.name));
+  res.end(csv);
+}
+
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
-  const stored = req.method === 'GET' && url.pathname.match(/^\/c\/([^/]+)\/([^/]+)$/);
-  if (stored) {
-    const csv = await readCsv(stored[1]).catch(() => null);
-    if (csv == null) { res.writeHead(404); return res.end('File not found'); }
-    res.writeHead(200, csvHeaders(decodeURIComponent(stored[2]))); return res.end(csv);
-  }
-  const file = req.method === 'GET' && url.pathname.match(/^\/f\/([^/]+)\/([^/]+)$/);
-  if (file) {
-    try { const csv = decodeCsv(file[1]); res.writeHead(200, csvHeaders(decodeURIComponent(file[2]))); return res.end(csv); }
-    catch { res.writeHead(400); return res.end('Invalid or corrupted file link'); }
-  }
+  const link = req.method === 'GET' && csvLinkParams(url);
+  if (link) return serveCsvLink(req, res, link);
   if (req.method === 'POST' && url.pathname === '/api/upload') {
-    try { const { status, body } = await uploadCsv({ ...(await readBody(req)), origin: `http://${req.headers.host}` }); return send(res, status, body); }
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const proto = req.headers['x-forwarded-proto'] || (host?.startsWith('localhost') ? 'http' : 'https');
+    try { const { status, body } = await uploadCsv({ ...(await readBody(req)), origin: `${proto}://${host}` }); return send(res, status, body); }
     catch (err) { return send(res, 400, { error: 'Bad request', detail: err.message }); }
   }
   const action = routes[`${req.method} ${url.pathname}`];
