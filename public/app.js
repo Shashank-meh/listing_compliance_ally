@@ -469,6 +469,14 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
 }
 
 // ---------- history ----------
+// Accepts ISO strings, epoch numbers and SimplAI's "DD-MM-YYYY HH:mm:ss".
+function parseDate(v) {
+  if (v == null || v === '') return null;
+  const m = String(v).match(/^(\d{2})-(\d{2})-(\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  const d = m ? new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0)) : new Date(isNaN(v) ? v : Number(v));
+  return isNaN(d) ? null : d;
+}
+
 // Titles for chats started in this browser, used when the API doesn't return one.
 function titles() { try { return JSON.parse(localStorage.getItem('ally.titles') || '{}'); } catch { return {}; } }
 function savedTitle(id) { return titles()[id] || null; }
@@ -486,12 +494,14 @@ async function loadHistory() {
     for (const it of items) {
       const id = findKey(it, ID_KEYS.conv) || (it.id != null ? String(it.id) : null);
       if (!id) continue;
-      const title = findKey(it, /^(title|name|summary|first_?message|conversation_?name)$/i) || savedTitle(id) || (extractUserText(it) && stripCsv(extractUserText(it))) || 'Untitled conversation';
-      const dateRaw = findKey(it, /^(createdAt|created_at|updatedAt|updated_at|created_on)$/i);
-      const date = dateRaw ? new Date(isNaN(dateRaw) ? dateRaw : Number(dateRaw)) : null;
+      // SimplAI list items look like { cid, message, created_at: "16-10-2026 20:55:20", status }.
+      const firstMsg = findKey(it, /^(title|name|summary|first_?message|conversation_?name)$/i) || extractUserText(it)
+        || (typeof it.message === 'string' ? it.message : null);
+      const title = savedTitle(id) || (firstMsg && stripCsv(firstMsg)) || 'Untitled conversation';
+      const date = parseDate(findKey(it, /^(createdAt|created_at|updatedAt|updated_at|created_on)$/i));
       const li = el('li');
       const b = el('button', id === state.conversationId ? 'active' : '',
-        `<span class="h-title">${esc(title)}</span>${date && !isNaN(date) ? `<span class="h-date">${date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>` : ''}`);
+        `<span class="h-title">${esc(title)}</span>${date ? `<span class="h-date">${date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>` : ''}`);
       b.onclick = () => { closeDrawers(); openConversation(id, title); };
       li.appendChild(b);
       list.appendChild(li);
@@ -515,7 +525,7 @@ async function openConversation(id, title) {
     const r = await api(`/api/conversation?id=${encodeURIComponent(id)}`);
     loading.m.remove();
     let items = findArray(r.data);
-    const ts = it => Date.parse(findKey(it, /^(createdAt|created_at)$/i) || '') || 0;
+    const ts = it => parseDate(findKey(it, /^(createdAt|created_at)$/i))?.getTime() || 0;
     if (items.length > 1 && ts(items[0]) > ts(items[items.length - 1])) items = [...items].reverse();
     if (!items.length) {
       const v = addBot(); fillBot(v, '_No messages found in this conversation._', r.data);
