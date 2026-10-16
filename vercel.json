@@ -1,4 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": { "api/*.js": { "maxDuration": 60 } }
+  "functions": { "api/*.js": { "maxDuration": 60 } },
+  "rewrites": [{ "source": "/f/:z/:name", "destination": "/api/csv?z=:z&name=:name" }]
 }

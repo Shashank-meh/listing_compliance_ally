@@ -155,15 +155,20 @@ function decorate(root) {
 function hideWelcome() { $('#welcome')?.classList.add('hidden'); }
 function scrollDown() { const t = $('#thread'); t.scrollTop = t.scrollHeight; }
 
-// The CSV travels inside the message text; in the thread it shows as a file chip.
-const CSV_BLOCK_RE = /\n*Listings CSV \(([^)]*)\):\n```csv\n([\s\S]*?)\n```\s*$/;
+// The CSV is sent as a link (see csvLink); in the thread it shows as a file chip.
+// CSV_BLOCK_RE also matches older messages that inlined the CSV text.
+const CSV_LINK_RE = /\s*Listings CSV \(([^)]*)\):\s*(https?:\/\/\S+)\s*$/;
+const CSV_BLOCK_RE = /\s*Listings CSV \(([^)]*)\):\s*```(?:csv)?\s*([\s\S]*?)\s*```\s*$/;
+const stripCsv = (t) => t.replace(CSV_LINK_RE, '').replace(CSV_BLOCK_RE, '').trim();
+const hasCsv = (t) => CSV_LINK_RE.test(t) || CSV_BLOCK_RE.test(t);
 
-function fileChip(name, meta, onRemove) {
-  const chip = el('div', 'file-chip', `<span class="fi">CSV</span><span class="fn">${esc(name)}</span><span class="fm">${esc(meta)}</span>`);
+function fileChip(name, meta, onRemove, href) {
+  const chip = el(href ? 'a' : 'div', 'file-chip', `<span class="fi">CSV</span><span class="fn">${esc(name)}</span><span class="fm">${esc(meta)}</span>`);
   if (onRemove) {
     const x = el('button', '', '✕'); x.type = 'button'; x.title = 'Remove'; x.onclick = onRemove;
     chip.appendChild(x);
   }
+  if (href) { chip.href = href; chip.target = '_blank'; chip.rel = 'noopener'; chip.title = 'Open the CSV the agent received'; }
   return chip;
 }
 
@@ -171,11 +176,13 @@ function addUser(text) {
   hideWelcome();
   const m = el('div', 'msg user');
   const stack = el('div', 'stack');
-  const csv = text.match(CSV_BLOCK_RE);
+  const link = text.match(CSV_LINK_RE);
+  const block = !link && text.match(CSV_BLOCK_RE);
+  const csv = link || block;
   const shown = csv ? text.slice(0, csv.index).trim() : text;
   if (csv) {
     const [name, size] = csv[1].split(',').map(s => s.trim());
-    stack.appendChild(fileChip(name || 'listings.csv', size || `${csvRows(csv[2])} rows`));
+    stack.appendChild(fileChip(name || 'listings.csv', size || (block ? `${csvRows(block[2])} rows` : ''), null, link ? link[2] : null));
   }
   if (shown) stack.appendChild(el('div', 'bubble')).textContent = shown;
   m.appendChild(stack);
@@ -220,6 +227,21 @@ function renderAttachment() {
     ? `${f.name} · ${f.rows} listings attached. Pick a flow below or ask anything.`
     : 'Drop it here or click to choose · title, bullets, description, image URLs, is_client, competitor_group';
   if (f) box.appendChild(fileChip(f.name, `${f.rows} listings`, () => { state.file = null; renderAttachment(); }));
+}
+
+// Packs the CSV into a URL on this site (gzip + base64url) that serves it back
+// as text/csv, so the agent's ingest step can fetch it like any hosted file.
+const MAX_LINK_CHARS = 12_000;
+async function csvLink(f) {
+  const gz = await new Response(new Blob([f.text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  const bytes = new Uint8Array(gz);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const z = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const name = f.name.replace(/[^\w.-]/g, '_').replace(/(\.csv)?$/i, '.csv');
+  const url = `${location.origin}/f/${z}/${name}`;
+  if (url.length > MAX_LINK_CHARS) throw new Error(`${f.name} is too large to link (${Math.round(url.length / 1000)}k characters compressed). Split it by competitor group and try again.`);
+  return url;
 }
 
 function pickFile(thenPrompt) {
@@ -375,14 +397,16 @@ async function send(text) {
   state.asked.add(text);
   if (state.file) {
     const f = state.file;
-    text += `\n\nListings CSV (${f.name}, ${f.rows} rows):\n\`\`\`csv\n${f.text}\n\`\`\``;
+    let url;
+    try { url = await csvLink(f); } catch (e) { return toast(e.message); }
+    text += `\n\nListings CSV (${f.name}, ${f.rows} rows): ${url}`;
     state.file = null;
     state.hasData = true;
     renderAttachment();
   }
   addUser(text);
-  const title = text.replace(CSV_BLOCK_RE, '').trim();
-  if (!state.conversationId) $('#chatTitle').textContent = title.length > 70 ? title.slice(0, 70) + '…' : title;
+  const title = stripCsv(text);
+  if (!state.conversationId) { state.pendingTitle = title; $('#chatTitle').textContent = title.length > 70 ? title.slice(0, 70) + '…' : title; }
   const view = addBot();
   await run(text, view);
 }
@@ -401,6 +425,7 @@ async function run(text, view) {
     const isNew = !state.conversationId;
     state.conversationId = cId;
     remember(cId);
+    if (isNew && state.pendingTitle) saveTitle(cId, state.pendingTitle);
     if (isNew) loadHistory();
     await poll(cId, mId, view, text, startedAt, ctrl);
   } catch (err) {
@@ -444,6 +469,10 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
 }
 
 // ---------- history ----------
+// Titles for chats started in this browser, used when the API doesn't return one.
+function titles() { try { return JSON.parse(localStorage.getItem('ally.titles') || '{}'); } catch { return {}; } }
+function savedTitle(id) { return titles()[id] || null; }
+function saveTitle(id, t) { try { const all = titles(); all[id] = t.slice(0, 120); localStorage.setItem('ally.titles', JSON.stringify(all)); } catch { /* storage unavailable */ } }
 function remember(id) { try { localStorage.setItem('ally.conversation', id); } catch { /* storage unavailable */ } }
 function recall() { try { return localStorage.getItem('ally.conversation'); } catch { return null; } }
 
@@ -457,7 +486,7 @@ async function loadHistory() {
     for (const it of items) {
       const id = findKey(it, ID_KEYS.conv) || (it.id != null ? String(it.id) : null);
       if (!id) continue;
-      const title = findKey(it, /^(title|name|summary|first_?message|conversation_?name)$/i) || extractUserText(it)?.replace(CSV_BLOCK_RE, '').trim() || 'Untitled conversation';
+      const title = findKey(it, /^(title|name|summary|first_?message|conversation_?name)$/i) || savedTitle(id) || (extractUserText(it) && stripCsv(extractUserText(it))) || 'Untitled conversation';
       const dateRaw = findKey(it, /^(createdAt|created_at|updatedAt|updated_at|created_on)$/i);
       const date = dateRaw ? new Date(isNaN(dateRaw) ? dateRaw : Number(dateRaw)) : null;
       const li = el('li');
@@ -493,7 +522,7 @@ async function openConversation(id, title) {
     }
     for (const it of items) {
       const u = extractUserText(it);
-      if (u) { addUser(u); state.asked.add(u); if (CSV_BLOCK_RE.test(u)) state.hasData = true; }
+      if (u) { addUser(u); state.asked.add(u); if (hasCsv(u)) state.hasData = true; }
       const reply = extractReply(it, u || '');
       if (reply) fillBot(addBot(), reply, it);
     }
@@ -587,7 +616,7 @@ function init() {
   renderPanel();
   loadHistory();
   const last = recall();
-  if (last) openConversation(last, 'Last conversation');
+  if (last) openConversation(last, savedTitle(last) || 'Last conversation');
   input.focus();
 }
 

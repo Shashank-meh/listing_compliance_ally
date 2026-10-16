@@ -20,6 +20,7 @@ function loadEnv(file) {
 loadEnv(path.join(ROOT, '.env'));
 
 const { runAction, missingConfig } = await import('./lib/simplai.js');
+const { decodeCsv, csvHeaders } = await import('./lib/csvlink.js');
 const missing = missingConfig();
 if (missing.length) {
   console.error(`Missing config: ${missing.join(', ')}. Copy .env.example to .env and fill it in.`);
@@ -63,6 +64,11 @@ const routes = {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  const file = req.method === 'GET' && url.pathname.match(/^\/f\/([^/]+)\/([^/]+)$/);
+  if (file) {
+    try { const csv = decodeCsv(file[1]); res.writeHead(200, csvHeaders(decodeURIComponent(file[2]))); return res.end(csv); }
+    catch { res.writeHead(400); return res.end('Invalid or corrupted file link'); }
+  }
   const action = routes[`${req.method} ${url.pathname}`];
   if (!action) return serveStatic(req, res, url);
   try {
