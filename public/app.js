@@ -718,8 +718,7 @@ function init() {
 
   renderPanel();
   loadHistory();
-  const last = recall();
-  if (last) openConversation(last, savedTitle(last) || 'Last conversation');
+  // Always start on a fresh audit; past chats are one click away in the sidebar.
   input.focus();
 }
 
