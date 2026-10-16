@@ -21,7 +21,7 @@ loadEnv(path.join(ROOT, '.env'));
 
 const { runAction, missingConfig } = await import('./lib/simplai.js');
 const { decodeCsv, csvHeaders } = await import('./lib/csvlink.js');
-const { uploadCsv } = await import('./lib/upload.js');
+const { uploadCsv, readCsv } = await import('./lib/upload.js');
 const missing = missingConfig();
 if (missing.length) {
   console.error(`Missing config: ${missing.join(', ')}. Copy .env.example to .env and fill it in.`);
@@ -65,13 +65,19 @@ const routes = {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  const stored = req.method === 'GET' && url.pathname.match(/^\/c\/([^/]+)\/([^/]+)$/);
+  if (stored) {
+    const csv = await readCsv(stored[1]).catch(() => null);
+    if (csv == null) { res.writeHead(404); return res.end('File not found'); }
+    res.writeHead(200, csvHeaders(decodeURIComponent(stored[2]))); return res.end(csv);
+  }
   const file = req.method === 'GET' && url.pathname.match(/^\/f\/([^/]+)\/([^/]+)$/);
   if (file) {
     try { const csv = decodeCsv(file[1]); res.writeHead(200, csvHeaders(decodeURIComponent(file[2]))); return res.end(csv); }
     catch { res.writeHead(400); return res.end('Invalid or corrupted file link'); }
   }
   if (req.method === 'POST' && url.pathname === '/api/upload') {
-    try { const { status, body } = await uploadCsv(await readBody(req)); return send(res, status, body); }
+    try { const { status, body } = await uploadCsv({ ...(await readBody(req)), origin: `http://${req.headers.host}` }); return send(res, status, body); }
     catch (err) { return send(res, 400, { error: 'Bad request', detail: err.message }); }
   }
   const action = routes[`${req.method} ${url.pathname}`];
