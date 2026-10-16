@@ -219,3 +219,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @media (max-width: 760px) { .msg.user .stack { max-width: 88%; } }
 a.file-chip { color: inherit; text-decoration: none; }
 a.file-chip:hover { border-color: var(--accent); }
+
+/* Tool steps the agent ran */
+.tool-steps { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.tool-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; background: var(--surface-2); border-radius: 9px; padding: 6px 10px; }
+.tool-step .ts-icon { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 11px; flex: none; }
+.tool-step.ok .ts-icon { background: var(--ok-bg); color: var(--ok); }
+.tool-step.warn .ts-icon { background: var(--major-bg); color: var(--major); }
+.tool-step .ts-name { font: 600 12px var(--mono); }
+.tool-step .ts-out { color: var(--muted); overflow-wrap: anywhere; }
+.tool-step .ts-note { flex-basis: 100%; color: var(--major); font-size: 12px; padding-left: 26px; }
+.chip.agent { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }

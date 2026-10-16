@@ -80,6 +80,47 @@ function tryJsonReply(s) {
   if (!/^[{[]/.test(t)) return null;
   try { const o = JSON.parse(t); const r = extractReply(o); return r && r !== s ? r : null; } catch { return null; }
 }
+// SimplAI replies can carry an OpenAI-style message list:
+// [{ role: 'assistant', tool_calls }, { role: 'tool', content }, { role: 'assistant', content },
+//  { role: 'follow_up_message', content: [..] }]
+function findMessages(root) {
+  let arr = null;
+  bfs(root, (v) => { if (Array.isArray(v) && v.length && v.every(x => x && typeof x === 'object' && 'role' in x)) { arr = v; return true; } });
+  return arr;
+}
+
+const textOf = (c) => typeof c === 'string' ? c : Array.isArray(c) ? c.map(x => typeof x === 'string' ? x : x?.text || '').join('') : '';
+
+// Groups a message list into turns: { user, reply, steps: [{ name, args, output }], followups }.
+function toTurns(messages) {
+  const turns = [];
+  let cur = null;
+  const open = () => (cur ||= { user: null, reply: '', steps: [], followups: [] });
+  for (const m of messages) {
+    const role = String(m.role).toLowerCase();
+    if (role === 'user') { if (cur) turns.push(cur); cur = { user: textOf(m.content), reply: '', steps: [], followups: [] }; continue; }
+    const t = open();
+    if (role === 'assistant') {
+      for (const call of m.tool_calls || []) {
+        let args = {};
+        try { args = JSON.parse(call.function?.arguments || '{}'); } catch { /* keep empty */ }
+        t.steps.push({ id: call.id, name: call.function?.name || 'tool', args, output: null });
+      }
+      const c = textOf(m.content).trim();
+      if (c) t.reply = t.reply ? `${t.reply}\n\n${c}` : c;
+    } else if (role === 'tool') {
+      const step = t.steps.find(s => s.id === m.tool_call_id) || t.steps[t.steps.length - 1];
+      let out = textOf(m.content);
+      try { const o = JSON.parse(out); out = typeof o === 'object' && o ? (o.output ?? o.result ?? out) : out; } catch { /* plain text */ }
+      if (step) step.output = typeof out === 'string' ? out : JSON.stringify(out);
+    } else if (role === 'follow_up_message') {
+      t.followups = (Array.isArray(m.content) ? m.content : [m.content]).filter(x => typeof x === 'string' && x.trim());
+    }
+  }
+  if (cur) turns.push(cur);
+  return turns;
+}
+
 function findArray(root) {
   if (Array.isArray(root)) return root;
   let arr = null;
@@ -157,7 +198,7 @@ function scrollDown() { const t = $('#thread'); t.scrollTop = t.scrollHeight; }
 
 // The CSV is sent as a link (see csvLink); in the thread it shows as a file chip.
 // CSV_BLOCK_RE also matches older messages that inlined the CSV text.
-const CSV_LINK_RE = /\s*Listings CSV \(([^)]*)\):\s*(https?:\/\/\S+)\s*$/;
+const CSV_LINK_RE = /\s*Listings CSV \(([^)]*)\)[^\n]*?:\s*(https?:\/\/\S+)\s*$/;
 const CSV_BLOCK_RE = /\s*Listings CSV \(([^)]*)\):\s*```(?:csv)?\s*([\s\S]*?)\s*```\s*$/;
 const stripCsv = (t) => t.replace(CSV_LINK_RE, '').replace(CSV_BLOCK_RE, '').trim();
 const hasCsv = (t) => CSV_LINK_RE.test(t) || CSV_BLOCK_RE.test(t);
@@ -278,8 +319,9 @@ function setThinking(card, startedAt) {
   card.innerHTML = `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span><span>${label}</span><span class="small">${secs}s</span></div>`;
 }
 
-function fillBot(view, text, raw) {
+function fillBot(view, text, raw, steps = []) {
   view.card.innerHTML = '';
+  if (steps.length) view.card.appendChild(renderSteps(steps));
   view.card.appendChild(renderMarkdown(text));
   const tools = el('div', 'msg-tools');
   const copy = el('button', '', 'Copy');
@@ -296,6 +338,22 @@ function fillBot(view, text, raw) {
   }
   view.body.appendChild(tools);
   absorb(text);
+}
+
+// Tool calls the agent made for this reply, e.g. "audit-file → Nothing to Score".
+function renderSteps(steps) {
+  const box = el('div', 'tool-steps');
+  for (const s of steps) {
+    const failed = s.output == null || /nothing to score|error|fail|invalid/i.test(s.output);
+    const url = s.args?.csv_url;
+    const note = typeof url === 'string' && url.startsWith('data:') ? 'csv_url was inline data, not a hosted link' : null;
+    const row = el('div', `tool-step ${failed ? 'warn' : 'ok'}`,
+      `<span class="ts-icon">${failed ? '!' : '✓'}</span><span class="ts-name">${esc(s.name)}</span>` +
+      `<span class="ts-out">${esc(s.output == null ? 'no result' : s.output.length > 120 ? s.output.slice(0, 120) + '…' : s.output)}</span>` +
+      (note ? `<span class="ts-note">${esc(note)}</span>` : ''));
+    box.appendChild(row);
+  }
+  return box;
 }
 
 function showError(view, err, retry) {
@@ -376,8 +434,11 @@ function renderFollowups() {
   const box = $('#followups');
   box.innerHTML = '';
   if (!state.conversationId || state.busy) return;
-  for (const f of FOLLOWUPS.filter(f => !state.asked.has(f.prompt)).slice(0, 4)) {
-    const c = el('button', 'chip', esc(f.label));
+  const agent = (state.agentFollowups || []).map(t => ({ label: t, prompt: t, agent: true }));
+  const ours = FOLLOWUPS.filter(f => !state.asked.has(f.prompt));
+  for (const f of [...agent, ...ours].slice(0, 5)) {
+    const c = el('button', f.agent ? 'chip agent' : 'chip', esc(f.label));
+    if (f.agent) c.title = 'Suggested by Ally';
     c.onclick = () => send(f.prompt);
     box.appendChild(c);
   }
@@ -399,7 +460,7 @@ async function send(text) {
     const f = state.file;
     let url;
     try { url = await csvLink(f); } catch (e) { return toast(e.message); }
-    text += `\n\nListings CSV (${f.name}, ${f.rows} rows): ${url}`;
+    text += `\n\nListings CSV (${f.name}, ${f.rows} rows), use as csv_url: ${url}`;
     state.file = null;
     state.hasData = true;
     renderAttachment();
@@ -445,8 +506,11 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
       const r = await api(`/api/poll?cId=${encodeURIComponent(cId)}&mId=${encodeURIComponent(mId)}`, { signal: ctrl.signal });
       if (r.ready) {
         clearInterval(tick);
-        const reply = extractReply(r.data, userText);
-        fillBot(view, reply || '_The agent returned an empty reply._', r.data);
+        const msgs = findMessages(r.data);
+        const turn = msgs && toTurns(msgs).pop();
+        const reply = (turn && turn.reply) || extractReply(r.data, userText);
+        fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
+        state.agentFollowups = turn?.followups || [];
         scrollDown();
         return;
       }
@@ -524,6 +588,19 @@ async function openConversation(id, title) {
   try {
     const r = await api(`/api/conversation?id=${encodeURIComponent(id)}`);
     loading.m.remove();
+    const msgs = findMessages(r.data);
+    if (msgs) {
+      const turns = toTurns(msgs);
+      for (const t of turns) {
+        if (t.user) { addUser(t.user); state.asked.add(t.user); if (hasCsv(t.user)) state.hasData = true; }
+        if (t.reply || t.steps.length) fillBot(addBot(), t.reply || '_No reply._', undefined, t.steps);
+      }
+      state.agentFollowups = turns.at(-1)?.followups || [];
+      if (!turns.length) fillBot(addBot(), '_No messages found in this conversation._', r.data);
+      scrollDown();
+      renderFollowups();
+      return;
+    }
     let items = findArray(r.data);
     const ts = it => parseDate(findKey(it, /^(createdAt|created_at)$/i))?.getTime() || 0;
     if (items.length > 1 && ts(items[0]) > ts(items[items.length - 1])) items = [...items].reverse();
@@ -548,6 +625,7 @@ function reset() {
   state.asked.clear();
   state.ruleCounts.clear();
   state.score = null;
+  state.agentFollowups = [];
   state.hasData = false;
   state.file = null;
   renderAttachment();
