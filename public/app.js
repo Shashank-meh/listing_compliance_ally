@@ -275,7 +275,11 @@ function renderAttachment() {
 async function uploadLink(f) {
   try {
     const res = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.name, text: f.text }) });
-    if (res.status === 501 || res.status === 404) return null;
+    if (res.status === 501 || res.status === 404) {
+      const body = await res.json().catch(() => ({}));
+      if (body.origin) state.publicOrigin = body.origin;
+      return null;
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.url) throw new Error(body.error || `Upload failed (${res.status})`);
     return body.url;
@@ -295,7 +299,7 @@ async function csvLink(f) {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   const z = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const name = f.name.replace(/[^\w.-]/g, '_').replace(/(\.csv)?$/i, '.csv');
-  const url = `${location.origin}/f/${z}/${name}`;
+  const url = `${state.publicOrigin || location.origin}/f/${z}/${name}`;
   if (url.length > MAX_LINK_CHARS) throw new Error(`${f.name} is too large to link (${Math.round(url.length / 1000)}k characters compressed). Split it by competitor group and try again.`);
   return url;
 }
