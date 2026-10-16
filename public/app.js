@@ -254,10 +254,10 @@ function scorecard(wrap, text) {
   return el('div', 'scorecard', bits.join(''));
 }
 
-function trimTable(table) {
+function trimTable(table, keep = TABLE_PREVIEW_ROWS) {
   const rows = [...table.querySelectorAll('tbody tr')];
-  if (rows.length <= TABLE_PREVIEW_ROWS + 1) return;
-  rows.slice(TABLE_PREVIEW_ROWS).forEach(r => r.classList.add('extra-row'));
+  if (rows.length <= keep + 1) return;
+  rows.slice(keep).forEach(r => r.classList.add('extra-row'));
   table.classList.add('trimmed');
   const btn = el('button', 'show-rows', `Show all ${rows.length} rows`);
   btn.type = 'button';
@@ -323,7 +323,7 @@ function addUser(text) {
   const link = text.match(CSV_LINK_RE);
   const block = !link && text.match(CSV_BLOCK_RE);
   const csv = link || block;
-  const shown = csv ? text.slice(0, csv.index).trim() : text;
+  const shown = (csv ? text.slice(0, csv.index).trim() : text).split(FORMAT_MARK)[0].split(DETAIL_MARK)[0].trim();
   if (csv) {
     const [name, size] = csv[1].split(',').map(s => s.trim());
     stack.appendChild(fileChip(name || 'listings.csv', size || (block ? `${csvRows(block[2])} rows` : ''), null, link ? link[2] : null));
@@ -439,7 +439,7 @@ function addBot() {
 
 function setThinking(card, startedAt) {
   const secs = Math.round((Date.now() - startedAt) / 1000);
-  const label = secs < 4 ? 'Ally is reading your request…' : secs < 20 ? 'Checking the listing against the rules…' : 'Still working — full audits can take a minute…';
+  const label = state.thinkingLabel ? `${state.thinkingLabel}` : secs < 4 ? 'Ally is reading your request…' : secs < 20 ? 'Checking the listing against the rules…' : 'Still working — full audits can take a minute…';
   card.innerHTML = `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span><span>${label}</span><span class="small">${secs}s</span></div>`;
 }
 
@@ -495,7 +495,7 @@ function showError(view, err, retry) {
 function absorb(text) {
   for (const id of text.match(RULE_RE) || []) state.ruleCounts.set(id, (state.ruleCounts.get(id) || 0) + 1);
   const s = detectScore(text);
-  if (s) state.score = s;
+  if (s && !state.scoreLocked) state.score = s;
   renderPanel();
 }
 
@@ -576,7 +576,8 @@ function renderFollowups() {
   const ours = FOLLOWUPS.filter(f => !state.asked.has(f.prompt));
   const images = (state.csv || state.csvUrl) && !state.imagesChecked
     ? [{ label: 'Check images', run: runImageCheck, special: true }] : [];
-  const items = [...images, ...agent, ...ours].slice(0, 4);
+  const extra = state.extraFollowups || [];
+  const items = [...extra.filter(f => !state.asked.has(f.prompt)), ...images, ...agent, ...ours].slice(0, 4);
   if (!items.length) return;
   const box = el('div', 'suggestions');
   box.id = 'followups';
@@ -601,7 +602,7 @@ function setBusy(b) {
   renderFollowups();
 }
 
-async function send(text) {
+async function send(text, opts = {}) {
   text = text.trim();
   if (!text || state.busy) return;
   state.asked.add(text);
@@ -617,9 +618,11 @@ async function send(text) {
   }
   addUser(text);
   const csvName = (text.match(CSV_LINK_RE) || text.match(CSV_BLOCK_RE))?.[1].split(',')[0].trim();
-  const title = stripCsv(text) === AUDIT_PROMPT ? `Audit · ${csvName || 'listings'}` : stripCsv(text);
+  const title = opts.title || (stripCsv(text) === AUDIT_PROMPT ? `Audit · ${csvName || 'listings'}` : stripCsv(text));
   if (!state.conversationId) { state.pendingTitle = title; $('#chatTitle').textContent = title.length > 70 ? title.slice(0, 70) + '…' : title; }
   const view = addBot();
+  state.expectSummary = opts.summary || null;
+  state.thinkingLabel = opts.thinking || null;
   await run(text, view);
 }
 
@@ -660,7 +663,8 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
         const msgs = findMessages(r.data);
         const turn = msgs && toTurns(msgs).pop();
         const reply = (turn && turn.reply) || extractReply(r.data, userText);
-        fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
+        const ctx = state.expectSummary; state.expectSummary = null; state.thinkingLabel = null;
+        if (!(ctx && reply && renderSummary(view, reply, ctx, r.data))) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
         state.agentFollowups = turn?.followups || [];
         scrollDown();
         return;
@@ -745,7 +749,10 @@ async function openConversation(id, title) {
       const turns = toTurns(msgs);
       for (const t of turns) {
         if (t.user) { addUser(t.user); state.asked.add(t.user); if (hasCsv(t.user)) { state.hasData = true; rememberCsv(t.user); } }
-        if (t.reply || t.steps.length) fillBot(addBot(), t.reply || '_No reply._', undefined, t.steps);
+        if (t.reply || t.steps.length) {
+          const v = addBot();
+          if (!(t.user?.includes(FORMAT_MARK) && renderSummary(v, t.reply, {}))) fillBot(v, t.reply || '_No reply._', undefined, t.steps);
+        }
       }
       state.agentFollowups = turns.at(-1)?.followups || [];
       if (!turns.length) fillBot(addBot(), '_No messages found in this conversation._', r.data);
@@ -783,6 +790,9 @@ function reset() {
   state.csv = null;
   state.csvUrl = null;
   state.imagesChecked = false;
+  state.extraFollowups = [];
+  state.flow = null;
+  state.scoreLocked = false;
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
   renderPanel();
@@ -804,12 +814,16 @@ function newChat() {
 function closeDrawers() { $('#app').classList.remove('sidebar-open', 'panel-open'); }
 
 function init() {
-  const startAudit = () => (state.file ? send(AUDIT_PROMPT) : pickFile(AUDIT_PROMPT));
+  const startAudit = () => { state.pendingFlow = true; $('#fileInput').value = ''; $('#fileInput').click(); };
   $('#startAudit').onclick = (e) => { e.stopPropagation(); startAudit(); };
   $('#dropzone').onclick = startAudit;
   $('#dropzone').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startAudit(); } };
   $('#attach').onclick = () => pickFile();
-  $('#fileInput').addEventListener('change', e => attachFile(e.target.files[0]));
+  $('#fileInput').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (state.pendingFlow) { state.pendingFlow = false; return flowUpload(file); }
+    attachFile(file);
+  });
   // Drag a CSV anywhere onto the chat.
   const main = $('.main');
   let depth = 0;
@@ -819,8 +833,9 @@ function init() {
   main.addEventListener('drop', e => {
     e.preventDefault(); depth = 0;
     main.classList.remove('dragging'); $('#composer').classList.remove('dragging');
-    if (!state.conversationId && !state.busy) state.pendingPrompt = AUDIT_PROMPT;
-    attachFile(e.dataTransfer.files[0]);
+    const file = e.dataTransfer.files[0];
+    if (!state.conversationId && !state.busy) return flowUpload(file);
+    attachFile(file);
   });
 
   const input = $('#input');
@@ -992,3 +1007,188 @@ function imageCard(img) {
   card.appendChild(info);
   return card;
 }
+
+// ---------- guided audit flow ----------
+// Upload → show what was uploaded → choose which client SKUs → the agent
+// audits just those groups → score cards and a summary table. Details only
+// come from the agent when you ask for a deep-dive.
+const FORMAT_MARK = '\n\nReply in exactly this format';
+const FLOW_MAX_BYTES = 5_000_000;
+const PREVIEW_ROWS = 6;
+
+const isClientRow = (r, hasCol) => !hasCol || /^(true|yes|y|1)$/i.test(r.is_client || '');
+const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+async function flowUpload(file) {
+  if (!file) return;
+  if (!/\.csv$/i.test(file.name) && file.type !== 'text/csv') return toast(`${file.name} isn't a CSV file.`);
+  if (file.size > FLOW_MAX_BYTES) return toast(`${file.name} is larger than 5 MB.`);
+  const text = (await file.text()).replace(/\r\n?/g, '\n').trim();
+  const rows = parseCsv(text);
+  if (!rows.length) return toast(`No rows found in ${file.name}.`);
+  const header = Object.keys(rows[0]);
+  const hasClient = header.includes('is_client');
+  const clients = rows.filter(r => isClientRow(r, hasClient)).map(r => ({
+    sku_id: r.sku_id || '', brand: r.brand || r.sku_id || 'Listing', group: r.competitor_group || '',
+  }));
+  const groups = new Set(rows.map(r => r.competitor_group).filter(Boolean));
+  state.flow = { name: file.name, text, rows, header, clients, hasClient };
+  state.csv = { name: file.name, text };
+  state.imagesChecked = false;
+
+  hideWelcome();
+  const u = el('div', 'msg user');
+  const stack = el('div', 'stack');
+  stack.appendChild(fileChip(file.name, `${rows.length} records`));
+  u.appendChild(stack);
+  $('#thread').appendChild(u);
+  $('#chatTitle').textContent = `Audit · ${file.name}`;
+
+  const v = addBot();
+  const md = el('div', 'md flow');
+  const competitors = rows.length - clients.length;
+  md.appendChild(el('div', 'flow-head', `<b>Uploaded ${esc(file.name)}</b><span class="muted">${rows.length} records · ${clients.length} client SKU${clients.length === 1 ? '' : 's'} · ${competitors} competitor${competitors === 1 ? '' : 's'}${groups.size ? ` · ${groups.size} competitor group${groups.size === 1 ? '' : 's'}` : ''}</span>`));
+  const missing = ['sku_id', 'is_client', 'competitor_group', 'title'].filter(c => !header.includes(c));
+  if (missing.length) md.appendChild(el('p', 'flow-warn', `Missing column${missing.length > 1 ? 's' : ''}: ${esc(missing.join(', '))}`));
+
+  const wrap = el('div', 'table-wrap');
+  const table = el('table', '', `<thead><tr><th>SKU</th><th>Brand</th><th>Type</th><th>Competitor group</th></tr></thead><tbody>${rows.map(r =>
+    `<tr><td class="mono">${esc(r.sku_id || '')}</td><td>${esc(r.brand || '')}</td><td>${isClientRow(r, hasClient) ? '<span class="sev pass">Client</span>' : '<span class="muted">Competitor</span>'}</td><td class="muted">${esc(r.competitor_group || '–')}</td></tr>`).join('')}</tbody>`);
+  wrap.appendChild(table); md.appendChild(wrap);
+  trimTable(table, PREVIEW_ROWS);
+
+  if (!clients.length) {
+    md.appendChild(el('p', '', 'No client SKUs found (rows with <code>is_client = TRUE</code>). Add one and upload again.'));
+  } else {
+    md.appendChild(el('p', 'flow-q', '<b>Which listings should I audit?</b>'));
+    const choices = el('div', 'flow-choices');
+    const options = clients.length <= 6 ? clients.map(c => ({ label: c.brand, sub: c.sku_id, pick: [c] })) : [];
+    options.push({ label: clients.length === 2 ? 'Both' : `All ${clients.length}`, sub: clients.length === 2 ? clients.map(c => c.brand).join(' + ') : 'client SKUs', pick: clients, primary: true });
+    for (const o of options) {
+      const b = el('button', `flow-choice${o.primary ? ' primary' : ''}`, `<b>${esc(o.label)}</b><span>${esc(o.sub)}</span>`);
+      b.onclick = () => {
+        if (state.busy) return;
+        choices.querySelectorAll('button').forEach(x => { x.disabled = true; x.classList.toggle('chosen', x === b); });
+        flowAudit(o.pick, o.pick.length === 1 ? o.label : o.pick.length === 2 ? o.pick.map(c => c.brand).join(' and ') : `all ${o.pick.length} client SKUs`);
+      };
+      choices.appendChild(b);
+    }
+    md.appendChild(choices);
+  }
+  v.card.innerHTML = '';
+  v.card.appendChild(md);
+  scrollDown();
+}
+
+async function flowAudit(picked, label) {
+  const f = state.flow;
+  const ids = new Set(picked.map(c => c.sku_id));
+  const groups = new Set(picked.map(c => c.group).filter(Boolean));
+  const subset = f.rows.filter(r => ids.has(r.sku_id) || (r.competitor_group && groups.has(r.competitor_group)));
+  const csvText = [f.header.map(cell).join(','), ...subset.map(r => f.header.map(h => cell(r[h])).join(','))].join('\n');
+  const base = f.name.replace(/\.csv$/i, '');
+  const file = { name: `${base}-${label.replace(/[^\w]+/g, '_')}.csv`, text: csvText, rows: subset.length };
+  let url;
+  try { url = await uploadLink(file) || await csvLink(file); } catch (e) { return toast(e.message); }
+  const competitors = subset.length - picked.length;
+  const message = `Audit ${label}${FORMAT_MARK} and nothing else:\n\n`
+    + 'SKU: <sku_id> · Compliance score: <N>/100\n| SKU | Field | Rule | Severity | Finding | Fix |\n|---|---|---|---|---|---|\n\n'
+    + 'One block per client SKU (is_client = TRUE), one table row per finding.'
+    + `\n\nListings CSV (${file.name}, ${file.rows} rows), use as csv_url: ${url}`;
+  state.hasData = true;
+  await send(message, {
+    title: `Audit · ${label}`,
+    thinking: `Auditing ${subset.length} record${subset.length === 1 ? '' : 's'} (${picked.length} client, ${competitors} competitor${competitors === 1 ? '' : 's'})…`,
+    summary: { clients: picked, records: subset.length, competitors },
+  });
+}
+
+// Reads "SKU: X · Compliance score: N/100" lines and findings tables.
+function parseAuditReply(reply, clientIds) {
+  const scores = {};
+  for (const m of reply.matchAll(/SKU:\s*\**\s*([A-Za-z0-9._-]+)[^\n]*?score[^\d\n]{0,20}(\d{1,3}(?:\.\d+)?)/gi)) scores[m[1]] = Math.min(100, Number(m[2]));
+  const findings = [];
+  const lines = reply.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] || '')) continue;
+    const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.replace(/\*\*|`/g, '').trim());
+    const head = cells(lines[i]).map(h => h.toLowerCase());
+    const col = (re) => head.findIndex(h => re.test(h));
+    const ix = { sku: col(/sku|asin/), field: col(/field|attribute/), rule: col(/rule/), sev: col(/sever|priority/), finding: col(/finding|issue|problem|detail/) };
+    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i++) {
+      const c = cells(lines[i]);
+      const sev = String(ix.sev >= 0 ? c[ix.sev] : '').toLowerCase();
+      findings.push({
+        sku: ix.sku >= 0 ? c[ix.sku] : '', field: ix.field >= 0 ? c[ix.field] : '',
+        rule: (lines[i].match(RULE_RE) || [''])[0], finding: ix.finding >= 0 ? c[ix.finding] : '',
+        severity: ['critical', 'major', 'minor'].find(k => sev.includes(k)) || 'minor',
+      });
+    }
+  }
+  const ids = clientIds?.length ? clientIds : [...new Set([...Object.keys(scores), ...findings.map(f => f.sku).filter(Boolean)])];
+  if (!ids.length) return [];
+  return ids.map(id => {
+    const mine = findings.filter(f => (f.sku ? f.sku.includes(id) : ids.length === 1));
+    let score = scores[id];
+    if (score == null && ids.length === 1) score = detectScore(reply)?.after;
+    return { sku_id: id, score: score ?? null, findings: mine };
+  }).filter(r => r.score != null || r.findings.length);
+}
+
+function renderSummary(view, reply, ctx, raw) {
+  const clients = ctx.clients || [];
+  const results = parseAuditReply(reply, clients.map(c => c.sku_id));
+  if (!results.length) return false;
+  const brandOf = (id) => clients.find(c => c.sku_id === id)?.brand || state.flow?.clients.find(c => c.sku_id === id)?.brand || '';
+  const band = (v) => v == null ? 'none' : v >= 85 ? 'good' : v >= 60 ? 'work' : 'risk';
+  const BAND = { good: 'Good', work: 'Needs work', risk: 'At risk', none: 'No score' };
+
+  const md = el('div', 'md flow');
+  if (ctx.records) md.appendChild(el('div', 'flow-head', `<b>Audited ${ctx.records} record${ctx.records === 1 ? '' : 's'}</b><span class="muted">${results.length} client SKU${results.length === 1 ? '' : 's'} · ${ctx.competitors} competitor${ctx.competitors === 1 ? '' : 's'}</span>`));
+
+  const cards = el('div', 'score-cards');
+  for (const r of results) {
+    const b = band(r.score);
+    cards.appendChild(el('div', `score-card ${b}`, `<div class="sc-num">${r.score == null ? '–' : Math.round(r.score)}<small>/100</small></div><div><b>${esc(brandOf(r.sku_id) || r.sku_id)}</b><span class="muted mono">${esc(r.sku_id)}</span><span class="sc-band">${BAND[b]}</span></div>`));
+  }
+  md.appendChild(cards);
+
+  const count = (r, k) => r.findings.filter(f => f.severity === k).length;
+  const top = (r) => { const f = r.findings.find(x => x.severity === 'critical') || r.findings[0]; return f ? `${f.rule ? `<span class="rule">${esc(f.rule)}</span> ` : ''}${esc(f.finding || f.field)}` : '<span class="muted">None reported</span>'; };
+  const wrap = el('div', 'table-wrap');
+  const table = el('table', 'summary-table', `<thead><tr><th>SKU</th><th>Brand</th><th>Score</th><th>Critical</th><th>Major</th><th>Minor</th><th>Top issue</th><th></th></tr></thead><tbody>${results.map(r => `
+    <tr><td class="mono">${esc(r.sku_id)}</td><td>${esc(brandOf(r.sku_id))}</td>
+    <td><b class="score-${band(r.score)}">${r.score == null ? '–' : Math.round(r.score)}</b></td>
+    <td>${count(r, 'critical') ? `<span class="sev critical">${count(r, 'critical')}</span>` : '0'}</td>
+    <td>${count(r, 'major') ? `<span class="sev major">${count(r, 'major')}</span>` : '0'}</td>
+    <td>${count(r, 'minor') ? `<span class="sev minor">${count(r, 'minor')}</span>` : '0'}</td>
+    <td class="top-issue">${top(r)}</td>
+    <td><button class="btn deep-dive" data-sku="${esc(r.sku_id)}">Deep-dive</button></td></tr>`).join('')}</tbody>`);
+  wrap.appendChild(table); md.appendChild(wrap);
+  md.appendChild(el('p', 'muted small', 'Deep-dive on a SKU for every finding by field, the suggested fixes and how it compares with its competitors.'));
+  table.querySelectorAll('.deep-dive').forEach(b => {
+    b.onclick = () => { const id = b.dataset.sku; send(deepDivePrompt(id, brandOf(id))); };
+  });
+
+  view.card.innerHTML = '';
+  view.card.appendChild(md);
+  const tools = el('div', 'msg-tools');
+  const rawBtn = el('button', '', "Agent's reply");
+  let pre;
+  rawBtn.onclick = () => { if (pre) { pre.remove(); pre = null; return; } pre = el('pre', 'raw'); pre.textContent = reply; view.body.appendChild(pre); };
+  tools.appendChild(rawBtn);
+  view.body.appendChild(tools);
+
+  // Summary panel: average score and every rule the agent cited.
+  absorb(reply);
+  const scored = results.filter(r => r.score != null);
+  if (scored.length) { state.score = { after: Math.round(scored.reduce((a, r) => a + r.score, 0) / scored.length) }; state.scoreLocked = true; }
+  renderPanel();
+  state.extraFollowups = results.map(r => ({ label: `Deep-dive ${brandOf(r.sku_id) || r.sku_id}`, prompt: deepDivePrompt(r.sku_id, brandOf(r.sku_id)) }));
+  return true;
+}
+
+// The instruction after DETAIL_MARK is sent to the agent but not shown in the bubble.
+const DETAIL_MARK = '\n\nInclude ';
+const deepDivePrompt = (id, brand) => `Deep-dive ${brand ? `${brand} (${id})` : id}${DETAIL_MARK}every finding by field with rule ID, severity and a suggested fix, then compare it with its competitor group.`;
+
