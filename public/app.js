@@ -574,16 +574,18 @@ function renderFollowups() {
   if (!state.conversationId || state.busy) return;
   const agent = (state.agentFollowups || []).map(t => ({ label: t, prompt: t, agent: true }));
   const ours = FOLLOWUPS.filter(f => !state.asked.has(f.prompt));
-  const items = [...agent, ...ours].slice(0, 4);
+  const images = (state.csv || state.csvUrl) && !state.imagesChecked
+    ? [{ label: 'Check images', run: runImageCheck, special: true }] : [];
+  const items = [...images, ...agent, ...ours].slice(0, 4);
   if (!items.length) return;
   const box = el('div', 'suggestions');
   box.id = 'followups';
   box.appendChild(el('div', 'suggestions-label', 'Suggested next steps'));
   const row = el('div', 'suggestion-row');
   for (const f of items) {
-    const c = el('button', f.agent ? 'chip agent' : 'chip', esc(f.label));
+    const c = el('button', f.special ? 'chip special' : f.agent ? 'chip agent' : 'chip', f.special ? `${IMG_ICON}${esc(f.label)}` : esc(f.label));
     if (f.agent) c.title = 'Suggested by Ally';
-    c.onclick = () => send(f.prompt);
+    c.onclick = () => (f.run ? f.run() : send(f.prompt));
     row.appendChild(c);
   }
   box.appendChild(row);
@@ -608,6 +610,7 @@ async function send(text) {
     let url;
     try { url = await uploadLink(f) || await csvLink(f); } catch (e) { return toast(e.message); }
     text += `\n\nListings CSV (${f.name}, ${f.rows} rows), use as csv_url: ${url}`;
+    state.csv = { name: f.name, text: f.text };
     state.file = null;
     state.hasData = true;
     renderAttachment();
@@ -741,7 +744,7 @@ async function openConversation(id, title) {
     if (msgs) {
       const turns = toTurns(msgs);
       for (const t of turns) {
-        if (t.user) { addUser(t.user); state.asked.add(t.user); if (hasCsv(t.user)) state.hasData = true; }
+        if (t.user) { addUser(t.user); state.asked.add(t.user); if (hasCsv(t.user)) { state.hasData = true; rememberCsv(t.user); } }
         if (t.reply || t.steps.length) fillBot(addBot(), t.reply || '_No reply._', undefined, t.steps);
       }
       state.agentFollowups = turns.at(-1)?.followups || [];
@@ -758,7 +761,7 @@ async function openConversation(id, title) {
     }
     for (const it of items) {
       const u = extractUserText(it);
-      if (u) { addUser(u); state.asked.add(u); if (hasCsv(u)) state.hasData = true; }
+      if (u) { addUser(u); state.asked.add(u); if (hasCsv(u)) { state.hasData = true; rememberCsv(u); } }
       const reply = extractReply(it, u || '');
       if (reply) fillBot(addBot(), reply, it);
     }
@@ -777,6 +780,9 @@ function reset() {
   state.agentFollowups = [];
   state.hasData = false;
   state.file = null;
+  state.csv = null;
+  state.csvUrl = null;
+  state.imagesChecked = false;
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
   renderPanel();
@@ -854,3 +860,135 @@ function init() {
 }
 
 init();
+
+// ---------- image checks (run by this app, not the agent) ----------
+const IMG_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>';
+
+function rememberCsv(text) {
+  const link = text.match(CSV_LINK_RE);
+  if (link) { state.csvUrl = link[2]; return; }
+  const block = text.match(CSV_BLOCK_RE);
+  if (block) state.csv = { name: block[1].split(',')[0].trim(), text: block[2] };
+}
+
+// RFC 4180-style CSV parser (quoted fields, embedded commas/newlines, "" escapes).
+function parseCsv(text) {
+  const rows = []; let row = [], field = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') q = false;
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(field); rows.push(row); row = []; field = ''; }
+    else field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  const [head, ...body] = rows.filter(r => r.some(v => v.trim()));
+  if (!head) return [];
+  const keys = head.map(h => h.trim().toLowerCase());
+  return body.map(r => Object.fromEntries(keys.map((k, i) => [k, (r[i] ?? '').trim()])));
+}
+
+async function loadCsvText() {
+  if (state.csv) return state.csv.text;
+  if (!state.csvUrl) return null;
+  const res = await fetch(state.csvUrl);
+  if (!res.ok) throw new Error(`Couldn't load the CSV (HTTP ${res.status})`);
+  const text = await res.text();
+  state.csv = { name: decodeURIComponent(state.csvUrl.split('/').pop()), text };
+  return text;
+}
+
+function skusFromCsv(text) {
+  const rows = parseCsv(text);
+  const clients = rows.filter(r => /^(true|yes|1)$/i.test(r.is_client || ''));
+  return (clients.length ? clients : rows).map(r => ({
+    sku_id: r.sku_id || r.sku || r.asin || '',
+    title: r.brand ? `${r.brand}${r.sku_id ? ` (${r.sku_id})` : ''}` : r.title?.slice(0, 60) || r.sku_id,
+    image_urls: (r.image_urls || '').split(/[|,\s]+/).filter(u => /^https?:\/\//i.test(u)),
+  })).filter(s => s.sku_id || s.image_urls.length);
+}
+
+async function runImageCheck() {
+  if (state.busy) return;
+  state.imagesChecked = true;
+  addUser('Check images');
+  const view = addBot();
+  setBusy(true);
+  try {
+    const skus = skusFromCsv(await loadCsvText() || '');
+    if (!skus.length) throw new Error('No SKUs with image_urls found in the CSV.');
+    const results = [];
+    for (const [i, sku] of skus.entries()) {
+      view.card.innerHTML = `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span><span>Checking images for ${esc(sku.title)} (${i + 1} of ${skus.length})…</span></div>`;
+      const res = await fetch('/api/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sku) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Image check failed (HTTP ${res.status})`);
+      results.push(body);
+    }
+    renderImageReport(view, results);
+  } catch (err) {
+    showError(view, err, { label: 'Try again', fn: () => { view.m.remove(); state.imagesChecked = false; runImageCheck(); } });
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderImageReport(view, results) {
+  const all = results.flatMap(r => [...r.images.flatMap(i => i.checks), ...r.listingChecks]);
+  const fails = all.filter(c => c.status === 'fail').length, warns = all.filter(c => c.status === 'warn').length;
+  const imgCount = results.reduce((n, r) => n + r.images.length, 0);
+  const md = el('div', 'md image-report');
+  md.appendChild(el('div', 'scorecard', `<span class="sc-item"><b>Image check</b></span><span class="sc-item">${imgCount} image${imgCount === 1 ? '' : 's'} · ${results.length} SKU${results.length === 1 ? '' : 's'}</span>` +
+    (fails ? `<span class="sc-item"><i class="dot critical"></i>${fails} failed</span>` : '') +
+    (warns ? `<span class="sc-item"><i class="dot major"></i>${warns} to review</span>` : '') +
+    (!fails && !warns ? '<span class="sc-item"><i class="dot ok"></i>All checks passed</span>' : '')));
+
+  results.forEach((r, n) => {
+    const d = el('details', 'section'); if (n === 0) d.open = true;
+    const rf = [...r.images.flatMap(i => i.checks), ...r.listingChecks];
+    const f = rf.filter(c => c.status === 'fail').length, w = rf.filter(c => c.status === 'warn').length;
+    d.appendChild(el('summary', '', `<span class="section-title">${esc(r.title || r.sku_id)}</span><span class="section-meta">${f ? `<span class="sev critical">${f} failed</span>` : ''}${w ? `<span class="sev major">${w} to review</span>` : ''}${!f && !w ? '<span class="sev pass">passed</span>' : ''}</span>`));
+    const body = el('div', 'section-body');
+    for (const c of r.listingChecks) body.appendChild(el('p', 'listing-check', `${statusIcon(c.status)} <b>${esc(c.label)}</b> <span class="muted">· ${esc(c.detail)}</span>`));
+    const grid = el('div', 'img-grid');
+    for (const img of r.images) grid.appendChild(imageCard(img));
+    body.appendChild(grid);
+    if (r.aiNote) body.appendChild(el('p', 'muted small', esc(r.aiNote)));
+    d.appendChild(body);
+    md.appendChild(d);
+  });
+  md.appendChild(el('p', 'muted small', 'Checked by this app against Amazon’s image requirements: background, fill and resolution are measured; text, props, cropping and sharpness are judged by Claude vision.'));
+  view.card.innerHTML = '';
+  view.card.appendChild(md);
+  scrollDown();
+}
+
+const statusIcon = (s) => `<span class="st ${s}">${s === 'pass' ? '✓' : s === 'warn' ? '!' : '✕'}</span>`;
+
+function imageCard(img) {
+  const card = el('div', 'img-card');
+  const label = img.role === 'main' ? 'Main image' : `Image ${img.index + 1}`;
+  const thumb = el('a', 'img-thumb');
+  thumb.href = img.url; thumb.target = '_blank'; thumb.rel = 'noopener';
+  const pic = new Image(); pic.loading = 'lazy'; pic.alt = label; pic.src = img.thumb || img.url;
+  pic.onerror = () => { thumb.classList.add('broken'); pic.remove(); };
+  thumb.appendChild(pic);
+  card.appendChild(thumb);
+  const info = el('div', 'img-info');
+  info.appendChild(el('div', 'img-label', `<b>${label}</b>${img.width ? `<span class="muted"> · ${img.width}×${img.height}</span>` : ''}`));
+  if (img.error) info.appendChild(el('div', 'img-check', `${statusIcon('fail')}<span>${esc(img.error)}</span>`));
+  const issues = img.checks.filter(c => c.status !== 'pass'), passed = img.checks.filter(c => c.status === 'pass');
+  for (const c of issues) info.appendChild(el('div', 'img-check', `${statusIcon(c.status)}<span><b>${esc(c.label)}</b>${c.rule ? ` <span class="rule">${esc(c.rule)}</span>` : ''}<br><span class="muted">${esc(c.detail)}</span></span>`));
+  if (passed.length) {
+    const more = el('details', 'img-passed');
+    more.appendChild(el('summary', '', `${passed.length} check${passed.length === 1 ? '' : 's'} passed`));
+    for (const c of passed) more.appendChild(el('div', 'img-check', `${statusIcon('pass')}<span>${esc(c.label)} <span class="muted">· ${esc(c.detail)}</span></span>`));
+    info.appendChild(more);
+  }
+  card.appendChild(info);
+  return card;
+}

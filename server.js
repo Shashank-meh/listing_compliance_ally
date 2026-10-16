@@ -22,6 +22,7 @@ loadEnv(path.join(ROOT, '.env'));
 const { runAction, missingConfig } = await import('./lib/simplai.js');
 const { decodeCsv, csvHeaders } = await import('./lib/csvlink.js');
 const { uploadCsv, readCsv, storageHealth } = await import('./lib/upload.js');
+const { checkSkuImages } = await import('./lib/images.js');
 const missing = missingConfig();
 if (missing.length) {
   console.error(`Missing config: ${missing.join(', ')}. Copy .env.example to .env and fill it in.`);
@@ -96,6 +97,13 @@ http.createServer(async (req, res) => {
   const link = req.method === 'GET' && csvLinkParams(url);
   if (link) return serveCsvLink(req, res, link);
   if (url.pathname === '/api/health') return send(res, 200, { runtime: 'server.js', storage: await storageHealth() });
+  if (req.method === 'POST' && url.pathname === '/api/images') {
+    try {
+      const body = await readBody(req);
+      if (!Array.isArray(body.image_urls)) return send(res, 400, { error: 'image_urls must be an array' });
+      return send(res, 200, await checkSkuImages(body));
+    } catch (err) { return send(res, 400, { error: 'Bad request', detail: err.message }); }
+  }
   if (req.method === 'POST' && url.pathname === '/api/upload') {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const proto = req.headers['x-forwarded-proto'] || (host?.startsWith('localhost') ? 'http' : 'https');

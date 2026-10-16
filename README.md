@@ -24,6 +24,8 @@ change names its rule.
    | `SIMPLAI_AGENT_ID` | e.g. `agent-…` |
    | `SIMPLAI_DEVICE_ID` | optional, defaults to `simplai` |
    | `SIMPLAI_BASE_URL` | optional, defaults to `https://edge-service.simplai.ai` |
+   | `ANTHROPIC_API_KEY` | for **Check images** (Claude vision); without it only the measured checks run |
+   | `PUBLIC_BASE_URL` | optional, the public address CSV links should use (defaults to the Vercel production domain) |
 
 3. Deploy. Every push to `main` redeploys automatically.
 4. **Connect file storage** (needed for CSV audits): in the project, open **Storage → Create → Blob**, create a
@@ -36,6 +38,13 @@ self-contained link (`/f/<gzip+base64>/listings.csv`), which works but is long e
 mis-copy it.
 
 The API key lives only in Vercel's environment; the browser talks to `/api/*` functions, never to SimplAI directly.
+
+## Image checks
+After an audit, **Check images** reviews each client SKU's `image_urls` against Amazon's image requirements.
+This runs in the app (`lib/images.js`), not the SimplAI agent:
+- **Measured in code:** white background (edge pixels), product fill (≥85% of the frame), resolution (≥1000 px), file type, image count (5–7).
+- **Judged by Claude vision** (`claude-opus-5-5`): main image free of text/logos/badges, props, cropping, real photo, sharpness; secondary images free of promotional badges.
+Map checks to your rulebook IDs in `RULE_IDS` in `lib/images.js`.
 
 ## Run locally
 ```bash
