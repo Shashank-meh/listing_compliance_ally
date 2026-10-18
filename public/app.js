@@ -323,7 +323,7 @@ function addUser(text) {
   const link = text.match(CSV_LINK_RE);
   const block = !link && text.match(CSV_BLOCK_RE);
   const csv = link || block;
-  const shown = (csv ? text.slice(0, csv.index).trim() : text).split(FORMAT_MARK)[0].split(DETAIL_MARK)[0].trim();
+  const shown = (csv ? text.slice(0, csv.index).trim() : text).split(FORMAT_MARK)[0].split(DETAIL_MARK)[0].split(RUN_MARK)[0].trim();
   if (csv) {
     const [name, size] = csv[1].split(',').map(s => s.trim());
     stack.appendChild(fileChip(name || 'listings.csv', size || (block ? `${csvRows(block[2])} rows` : ''), null, link ? link[2] : null));
@@ -605,6 +605,8 @@ function setBusy(b) {
 async function send(text, opts = {}) {
   text = text.trim();
   if (!text || state.busy) return;
+  // Report and rewrite tools need the audit's run_id; the agent only sees it if we pass it on.
+  if (state.runId && !/run_id/i.test(text)) text += `${RUN_MARK}${state.runId} for any report or rewrite tool.`;
   state.asked.add(text);
   if (state.file) {
     const f = state.file;
@@ -663,6 +665,7 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
         const msgs = findMessages(r.data);
         const turn = msgs && toTurns(msgs).pop();
         const reply = (turn && turn.reply) || extractReply(r.data, userText);
+        rememberRunId(reply, r.data);
         const ctx = state.expectSummary; state.expectSummary = null; state.thinkingLabel = null;
         if (!(ctx && reply && renderSummary(view, reply, ctx, r.data))) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
         state.agentFollowups = turn?.followups || [];
@@ -748,6 +751,7 @@ async function openConversation(id, title) {
     if (msgs) {
       const turns = toTurns(msgs);
       for (const t of turns) {
+        if (t.reply) rememberRunId(t.reply, t.steps);
         if (t.user) { addUser(t.user); state.asked.add(t.user); if (hasCsv(t.user)) { state.hasData = true; rememberCsv(t.user); } }
         if (t.reply || t.steps.length) {
           const v = addBot();
@@ -793,6 +797,7 @@ function reset() {
   state.extraFollowups = [];
   state.flow = null;
   state.scoreLocked = false;
+  state.runId = null;
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
   renderPanel();
@@ -1092,6 +1097,7 @@ async function flowAudit(picked, label) {
   try { url = await uploadLink(file) || await csvLink(file); } catch (e) { return toast(e.message); }
   const competitors = subset.length - picked.length;
   const message = `Audit ${label}${FORMAT_MARK} and nothing else:\n\n`
+    + 'Run ID: <run_id returned by the audit tool>\n\n'
     + 'SKU: <sku_id> · Compliance score: <N>/100\n| SKU | Field | Rule | Severity | Finding | Fix |\n|---|---|---|---|---|---|\n\n'
     + 'One block per client SKU (is_client = TRUE), one table row per finding.'
     + `\n\nListings CSV (${file.name}, ${file.rows} rows), use as csv_url: ${url}`;
@@ -1144,7 +1150,8 @@ function renderSummary(view, reply, ctx, raw) {
   const BAND = { good: 'Good', work: 'Needs work', risk: 'At risk', none: 'No score' };
 
   const md = el('div', 'md flow');
-  if (ctx.records) md.appendChild(el('div', 'flow-head', `<b>Audited ${ctx.records} record${ctx.records === 1 ? '' : 's'}</b><span class="muted">${results.length} client SKU${results.length === 1 ? '' : 's'} · ${ctx.competitors} competitor${ctx.competitors === 1 ? '' : 's'}</span>`));
+  const runId = findRunId(reply);
+  if (ctx.records) md.appendChild(el('div', 'flow-head', `<b>Audited ${ctx.records} record${ctx.records === 1 ? '' : 's'}</b><span class="muted">${results.length} client SKU${results.length === 1 ? '' : 's'} · ${ctx.competitors} competitor${ctx.competitors === 1 ? '' : 's'}${runId ? ` · run <span class="mono">${esc(runId)}</span>` : ''}</span>`));
 
   const cards = el('div', 'score-cards');
   for (const r of results) {
@@ -1192,3 +1199,15 @@ function renderSummary(view, reply, ctx, raw) {
 const DETAIL_MARK = '\n\nInclude ';
 const deepDivePrompt = (id, brand) => `Deep-dive ${brand ? `${brand} (${id})` : id}${DETAIL_MARK}every finding by field with rule ID, severity and a suggested fix, then compare it with its competitor group.`;
 
+
+// ---------- audit run_id ----------
+const RUN_MARK = '\n\nUse run_id ';
+const RUN_ID_RE = /run[_\s-]?id\W{0,6}([A-Za-z0-9][A-Za-z0-9_-]{3,})/i;
+function findRunId(text) {
+  const m = String(text || '').match(RUN_ID_RE);
+  return m && !/^(from|returned|the|for|any)$/i.test(m[1]) ? m[1] : null;
+}
+function rememberRunId(reply, raw) {
+  const id = findRunId(reply) || (raw ? findRunId(JSON.stringify(raw).replace(/\\"/g, '"')) : null);
+  if (id) state.runId = id;
+}
