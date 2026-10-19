@@ -173,6 +173,7 @@ const TABLE_PREVIEW_ROWS = 5;
 
 function structure(wrap, text) {
   wrap.querySelectorAll('table').forEach(reshapeTable);
+  themeChips(wrap);
   wrap.querySelectorAll('table').forEach(t => trimTable(t));
   if (text.length < LONG_REPLY) return;
 
@@ -850,7 +851,7 @@ async function openConversation(id, title) {
         if (t.user) { addUser(t.user); state.asked.add(t.user); if (hasCsv(t.user)) { state.hasData = true; rememberCsv(t.user); } }
         if (t.reply || t.steps.length) {
           const v = addBot();
-          if (!(t.user?.includes(FORMAT_MARK) && renderSummary(v, t.reply, {}))) fillBot(v, t.reply || '_No reply._', undefined, t.steps);
+          if (!(t.user?.includes(FORMAT_MARK) && /^(Audit|Re-score)/.test(t.user) && renderSummary(v, t.reply, {}))) fillBot(v, t.reply || '_No reply._', undefined, t.steps);
           addSheetLinks(v, t, t.reply);
         }
       }
@@ -1353,11 +1354,34 @@ const PAIR_COMP = /^competitor(?:s|\s+group)?\s+(?:median|avg|average)\s+(.+)$/i
 // Measures where a smaller number is better.
 const LOWER_IS_BETTER = /violation|critical|error|issue|finding|title length/i;
 
+// Benchmark replies come as a long table (SKU | Measure | Client | Competitor
+// median) or a wide one (one row per SKU, "Client X" / "Competitor median X"
+// column pairs). Either becomes colour-coded comparison cards.
 function reshapeTable(table) {
   const head = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
   const rows = [...table.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent.trim()));
-  if (head.length < 6 || !rows.length || rows.length > 3) return;
+  if (!rows.length) return;
+  const items = benchmarkLong(head, rows) || benchmarkWide(head, rows);
+  if (!items?.length) return;
+  (table.closest('.table-wrap') || table).replaceWith(renderBenchmark(items));
+}
 
+function benchmarkLong(head, rows) {
+  const H = head.map(h => h.toLowerCase());
+  const ix = { sku: H.findIndex(h => /sku|asin/.test(h)), measure: H.findIndex(h => /measure|metric|dimension/.test(h)),
+    client: H.findIndex(h => /^client|client value/.test(h)), median: H.findIndex(h => /median|competitor/.test(h)) };
+  if (ix.measure < 0 || ix.client < 0 || ix.median < 0) return null;
+  const by = new Map();
+  for (const r of rows) {
+    const id = ix.sku >= 0 ? r[ix.sku] : '';
+    if (!by.has(id)) by.set(id, { sku: id, measures: [] });
+    by.get(id).measures.push({ label: r[ix.measure], client: r[ix.client], median: r[ix.median] });
+  }
+  return [...by.values()];
+}
+
+function benchmarkWide(head, rows) {
+  if (head.length < 5 || rows.length > 30) return null;
   const pairs = [];
   head.forEach((h, i) => {
     const m = h.match(PAIR_CLIENT);
@@ -1366,30 +1390,81 @@ function reshapeTable(table) {
     const j = head.findIndex(x => (x.match(PAIR_COMP)?.[1] || '').toLowerCase() === key);
     if (j >= 0) pairs.push({ label: cap(m[1]), ci: i, mi: j });
   });
+  if (pairs.length < 2) return null;
   const used = new Set(pairs.flatMap(p => [p.ci, p.mi]));
-  const others = head.map((h, i) => i).filter(i => !used.has(i));
-  const out = el('div', 'reshaped');
+  const skuCol = head.findIndex((h, i) => !used.has(i) && /sku|asin/i.test(h));
+  const others = head.map((h, i) => i).filter(i => !used.has(i) && i !== skuCol);
+  return rows.map(r => ({
+    sku: skuCol >= 0 ? r[skuCol] : '',
+    meta: others.filter(i => r[i]).map(i => [head[i], tidyNum(r[i])]),
+    measures: pairs.map(p => ({ label: p.label, client: r[p.ci], median: r[p.mi] })),
+  }));
+}
 
-  for (const r of rows) {
-    const card = el('div', 'compare-card');
-    const meta = others.map(i => r[i] ? `<span><span class="muted">${esc(head[i])}</span> <b>${esc(tidyNum(r[i]))}</b></span>` : '').join('');
-    if (pairs.length >= 2) {
-      card.innerHTML = `${meta ? `<div class="compare-meta">${meta}</div>` : ''}
-        <table class="compare"><thead><tr><th>Measure</th><th>Client</th><th>Competitor median</th><th>Gap</th></tr></thead><tbody>${pairs.map(p => {
-          const c = num(r[p.ci]), m = num(r[p.mi]);
-          let gap = '<span class="muted">–</span>';
-          if (c != null && m != null) {
-            const d = c - m, worse = LOWER_IS_BETTER.test(p.label) ? d > 0 : d < 0;
-            gap = d === 0 ? '<span class="muted">Even</span>' : `<span class="gap ${worse ? 'worse' : 'better'}">${d > 0 ? '▲' : '▼'} ${tidyNum(String(Math.abs(Math.round(d * 10) / 10)))}</span>`;
-          }
-          return `<tr><td>${esc(p.label)}</td><td><b>${esc(tidyNum(r[p.ci]))}</b></td><td>${esc(tidyNum(r[p.mi]))}</td><td>${gap}</td></tr>`;
-        }).join('')}</tbody></table>`;
-    } else {
-      card.innerHTML = `<dl class="kv">${head.map((h, i) => `<dt>${esc(h)}</dt><dd>${esc(tidyNum(r[i]))}</dd>`).join('')}</dl>`;
+// "Themes for SKU: a; b" lines become chips under that SKU's benchmark card.
+function themeChips(wrap) {
+  const RE = /^themes?(?: competitors cover)?(?: for)?\s*([A-Za-z0-9._-]*)\s*:\s*(.+)$/i;
+  for (const p of wrap.querySelectorAll('p, li')) {
+    // Consecutive lines can share one paragraph.
+    const lines = p.innerHTML.split(/<br\s*\/?>|\n/i).map(h => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent.trim(); }).filter(Boolean);
+    if (!lines.length || !lines.every(l => RE.test(l))) continue;
+    for (const line of lines) {
+      const m = line.match(RE);
+      const themes = m[2].split(/;|,(?![^(]*\))/).map(t => t.trim().replace(/\.$/, '')).filter(Boolean);
+      const box = el('div', 'bench-themes', `<span class="muted small">Competitors cover, ${esc(state.flow?.clients.find(c => c.sku_id === m[1])?.brand || m[1] || 'the client')} doesn’t:</span> ${themes.map(t => `<span class="theme">${esc(t)}</span>`).join('')}`);
+      const card = [...wrap.querySelectorAll('.bench-card')].find(c => m[1] && c.textContent.includes(m[1]));
+      if (card) card.appendChild(box); else p.before(box);
     }
+    p.remove();
+  }
+}
+
+// ahead / level / close / behind, from the client's gap to the median.
+function judge(label, c, m) {
+  if (c == null || m == null) return 'na';
+  const lower = LOWER_IS_BETTER.test(label);
+  const d = lower ? m - c : c - m; // > 0 means the client is ahead
+  if (d === 0) return 'level';
+  if (d > 0) return 'ahead';
+  const rel = Math.abs(d) / Math.max(Math.abs(m), 1);
+  return Math.abs(d) <= 1 && !/critical/i.test(label) && m > 3 ? 'close' : rel <= 0.15 ? 'close' : 'behind';
+}
+const JUDGE = { ahead: 'Ahead', level: 'Level', close: 'Close', behind: 'Behind', na: '–' };
+
+function renderBenchmark(items) {
+  const out = el('div', 'bench');
+  out.appendChild(el('div', 'bench-legend', '<span><i class="lg ahead"></i>Ahead or level</span><span><i class="lg close"></i>Close (within 15%)</span><span><i class="lg behind"></i>Behind</span><span><i class="lg median"></i>Competitor median</span>'));
+  const brandOf = (id) => state.flow?.clients.find(c => c.sku_id === id)?.brand || state.auditPicked?.picked.find(c => c.sku_id === id)?.brand || '';
+  for (const it of items) {
+    const ms = it.measures.map(x => {
+      const c = num(x.client), m = num(x.median);
+      return { ...x, c, m, verdict: judge(x.label, c, m) };
+    });
+    const n = (v) => ms.filter(x => x.verdict === v).length;
+    const behind = n('behind'), close = n('close'), ahead = n('ahead') + n('level');
+    const tone = behind >= Math.ceil(ms.length / 2) ? 'behind' : behind || close ? 'close' : 'ahead';
+    const card = el('div', `bench-card ${tone}`);
+    const brand = brandOf(it.sku);
+    card.innerHTML = `<div class="bench-head">
+        <div><b>${esc(brand || it.sku || 'Client')}</b>${brand && it.sku ? ` <span class="muted mono">${esc(it.sku)}</span>` : ''}</div>
+        <div class="bench-tally">${behind ? `<span class="t behind">Behind on ${behind}</span>` : ''}${close ? `<span class="t close">Close on ${close}</span>` : ''}${ahead ? `<span class="t ahead">Ahead on ${ahead}</span>` : ''}</div>
+      </div>
+      ${it.meta?.length ? `<div class="compare-meta">${it.meta.map(([k, v]) => `<span><span class="muted">${esc(k)}</span> <b>${esc(v)}</b></span>`).join('')}</div>` : ''}
+      <div class="bench-rows">${ms.map(x => {
+        const max = /score/i.test(x.label) && Math.max(x.c ?? 0, x.m ?? 0) <= 100 ? 100 : Math.max(x.c ?? 0, x.m ?? 0, 1) * 1.2;
+        const pc = x.c == null ? 0 : Math.max(2, Math.min(100, x.c / max * 100));
+        const pm = x.m == null ? null : Math.min(100, x.m / max * 100);
+        const d = x.c != null && x.m != null ? Math.round((x.c - x.m) * 10) / 10 : null;
+        return `<div class="bench-row ${x.verdict}">
+          <div class="br-label">${esc(cap(x.label))}${LOWER_IS_BETTER.test(x.label) ? ' <span class="muted small">(lower is better)</span>' : ''}</div>
+          <div class="br-bar"><span class="fill" style="width:${pc}%"></span>${pm != null ? `<span class="median" style="left:${pm}%" title="Competitor median ${esc(tidyNum(x.median))}"></span>` : ''}</div>
+          <div class="br-vals"><b>${esc(tidyNum(x.client) || '–')}</b><span class="muted"> vs ${esc(tidyNum(x.median) || '–')}</span></div>
+          <div class="br-verdict"><span class="pill ${x.verdict}">${JUDGE[x.verdict]}${d ? ` ${d > 0 ? '+' : '−'}${tidyNum(String(Math.abs(d)))}` : ''}</span></div>
+        </div>`;
+      }).join('')}</div>`;
     out.appendChild(card);
   }
-  (table.closest('.table-wrap') || table).replaceWith(out);
+  return out;
 }
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -1677,7 +1752,10 @@ function stepForPrompt(text) {
 }
 
 const auditLabel = () => state.auditPicked?.label || 'the audited SKUs';
-const benchmarkPrompt = () => `Benchmark ${auditLabel()} against the competitor median${DETAIL_MARK}score, image count, headed bullets, description length, title length and critical violations for each client SKU.`;
+const benchmarkPrompt = () => `Benchmark ${auditLabel()} against the competitor median${FORMAT_MARK}:\n\n`
+  + '| SKU | Measure | Client | Competitor median |\n|---|---|---|---|\n\n'
+  + 'One row per client SKU per measure: compliance score, image count, headed bullets, description length, title length, critical violations. Numbers only in the Client and Competitor median columns. '
+  + 'After the table, one line per client SKU: "Themes for <sku_id>: <themes competitors cover that the client does not, separated by ;>".';
 const rewritePrompt = () => `Rewrite ${auditLabel()}${DETAIL_MARK}a compliant title, 5 bullets and description for each client SKU, with the rule ID for every change, and save it to the review sheet.`;
 
 const finished = (key) => Boolean(state.done?.has(key) || state.skipped?.has(key));
