@@ -840,6 +840,7 @@ function init() {
   $('#fileInput').addEventListener('change', e => {
     const file = e.target.files[0];
     if (state.pendingFlow) { state.pendingFlow = false; return flowUpload(file); }
+    if (state.pendingSheet) { state.pendingSheet = false; if (file) file.text().then(t => rescoreFromCsv(t, file.name)); return; }
     attachFile(file);
   });
   // Drag a CSV anywhere onto the chat.
@@ -1102,27 +1103,27 @@ async function flowUpload(file) {
   scrollDown();
 }
 
-async function flowAudit(picked, label) {
-  const f = state.flow;
+async function flowAudit(picked, label, opts = {}) {
+  const f = opts.flow || state.flow;
   const ids = new Set(picked.map(c => c.sku_id));
   const groups = new Set(picked.map(c => c.group).filter(Boolean));
   const subset = f.rows.filter(r => ids.has(r.sku_id) || (r.competitor_group && groups.has(r.competitor_group)));
   const csvText = [f.header.map(cell).join(','), ...subset.map(r => f.header.map(h => cell(r[h])).join(','))].join('\n');
   const base = f.name.replace(/\.csv$/i, '');
-  const file = { name: `${base}-${label.replace(/[^\w]+/g, '_')}.csv`, text: csvText, rows: subset.length };
+  const file = { name: `${base}-${opts.rescore ? 'rescore-' : ''}${label.replace(/[^\w]+/g, '_')}.csv`, text: csvText, rows: subset.length };
   let url;
   try { url = await uploadLink(file) || await csvLink(file); } catch (e) { return toast(e.message); }
   const competitors = subset.length - picked.length;
-  const message = `Audit ${label}${FORMAT_MARK} and nothing else:\n\n`
+  const message = `${opts.rescore ? `Re-score ${label} with the rewritten listings` : `Audit ${label}`}${FORMAT_MARK} and nothing else:\n\n`
     + 'Run ID: <run_id returned by the audit tool>\n\n'
     + 'SKU: <sku_id> · Compliance score: <N>/100\n| SKU | Field | Rule | Severity | Finding | Fix |\n|---|---|---|---|---|---|\n\n'
     + 'One block per client SKU (is_client = TRUE), one table row per finding.'
     + `\n\nListings CSV (${file.name}, ${file.rows} rows), use as csv_url: ${url}`;
   state.hasData = true;
   await send(message, {
-    title: `Audit · ${label}`,
-    thinking: `Auditing ${subset.length} record${subset.length === 1 ? '' : 's'} (${picked.length} client, ${competitors} competitor${competitors === 1 ? '' : 's'})…`,
-    summary: { clients: picked, records: subset.length, competitors },
+    title: `${opts.rescore ? 'Re-score' : 'Audit'} · ${label}`,
+    thinking: `${opts.rescore ? 'Re-scoring' : 'Auditing'} ${subset.length} record${subset.length === 1 ? '' : 's'} (${picked.length} client, ${competitors} competitor${competitors === 1 ? '' : 's'})…`,
+    summary: { clients: picked, records: subset.length, competitors, before: opts.before || null },
   });
 }
 
@@ -1173,7 +1174,9 @@ function renderSummary(view, reply, ctx, raw) {
   const cards = el('div', 'score-cards');
   for (const r of results) {
     const b = band(r.score);
-    cards.appendChild(el('div', `score-card ${b}`, `<div class="sc-num">${r.score == null ? '–' : Math.round(r.score)}<small>/100</small></div><div><b>${esc(brandOf(r.sku_id) || r.sku_id)}</b><span class="muted mono">${esc(r.sku_id)}</span><span class="sc-band">${BAND[b]}</span></div>`));
+    const was = ctx.before?.[r.sku_id];
+    const delta = was != null && r.score != null ? Math.round(r.score - was) : null;
+    cards.appendChild(el('div', `score-card ${b}`, `<div class="sc-num">${r.score == null ? '–' : Math.round(r.score)}<small>/100</small></div><div><b>${esc(brandOf(r.sku_id) || r.sku_id)}</b><span class="muted mono">${esc(r.sku_id)}</span><span class="sc-band">${BAND[b]}</span>${delta != null ? `<span class="sc-delta ${delta >= 0 ? 'up' : 'down'}">was ${Math.round(was)} · ${delta >= 0 ? '+' : ''}${delta}</span>` : ''}</div>`));
   }
   md.appendChild(cards);
 
@@ -1182,7 +1185,7 @@ function renderSummary(view, reply, ctx, raw) {
   const wrap = el('div', 'table-wrap');
   const table = el('table', 'summary-table', `<thead><tr><th>SKU</th><th>Brand</th><th>Score</th><th>Critical</th><th>Major</th><th>Minor</th><th>Top issue</th><th></th></tr></thead><tbody>${results.map(r => `
     <tr><td class="mono">${esc(r.sku_id)}</td><td>${esc(brandOf(r.sku_id))}</td>
-    <td><b class="score-${band(r.score)}">${r.score == null ? '–' : Math.round(r.score)}</b></td>
+    <td>${ctx.before?.[r.sku_id] != null ? `<span class="muted">${Math.round(ctx.before[r.sku_id])} → </span>` : ''}<b class="score-${band(r.score)}">${r.score == null ? '–' : Math.round(r.score)}</b></td>
     <td>${count(r, 'critical') ? `<span class="sev critical">${count(r, 'critical')}</span>` : '0'}</td>
     <td>${count(r, 'major') ? `<span class="sev major">${count(r, 'major')}</span>` : '0'}</td>
     <td>${count(r, 'minor') ? `<span class="sev minor">${count(r, 'minor')}</span>` : '0'}</td>
@@ -1203,12 +1206,14 @@ function renderSummary(view, reply, ctx, raw) {
   tools.appendChild(rawBtn);
   view.body.appendChild(tools);
 
-  // Summary panel: average score and every rule the agent cited.
+  // Summary panel: average score and every rule the agent cited (a re-score starts fresh).
+  if (ctx.before) state.ruleCounts.clear();
   absorb(reply);
   const scored = results.filter(r => r.score != null);
   if (scored.length) { state.score = { after: Math.round(scored.reduce((a, r) => a + r.score, 0) / scored.length) }; state.scoreLocked = true; }
   renderPanel();
   setStep(4);
+  state.lastScores = Object.fromEntries(results.filter(r => r.score != null).map(r => [r.sku_id, r.score]));
   state.extraFollowups = results.map(r => ({ label: `Deep-dive ${brandOf(r.sku_id) || r.sku_id}`, prompt: deepDivePrompt(r.sku_id, brandOf(r.sku_id)) }));
   return true;
 }
@@ -1314,7 +1319,7 @@ function addSheetLinks(view, raw, replyText) {
   // Only clickable links count as shown (a URL inside a tool step's text doesn't).
   const shown = new Set([...view.card.querySelectorAll('a[href*="docs.google.com/spreadsheets"]')].flatMap(a => findSheetLinks(a.href).map(l => l.id)));
   const links = findSheetLinks(raw).concat(findSheetLinks(replyText || '')).filter(l => !shown.has(l.id) && (shown.add(l.id), true));
-  if (!links.length) return;
+  if (links.length) {
   const box = el('div', 'sheet-links md');
   for (const l of links) {
     const tab = l.url.match(/[#&?]gid=(\d+)/);
@@ -1323,4 +1328,204 @@ function addSheetLinks(view, raw, replyText) {
     box.appendChild(a);
   }
   view.card.appendChild(box);
+  }
+  addRescoreButtons(view);
+}
+
+// ---------- re-score from the review sheet ----------
+// The agent writes rewrites to a Google Sheet. Read that sheet (or a CSV
+// downloaded from it), map its columns to the listing fields, merge the
+// rewrites into the original listings CSV and send it back for scoring.
+const REWRITE_FIELDS = [
+  ['title', 'Title', /\btitle\b/],
+  ['bullet_1', 'Bullet 1', /bullet\s*0?1\b|\bb1\b/], ['bullet_2', 'Bullet 2', /bullet\s*0?2\b|\bb2\b/],
+  ['bullet_3', 'Bullet 3', /bullet\s*0?3\b|\bb3\b/], ['bullet_4', 'Bullet 4', /bullet\s*0?4\b|\bb4\b/],
+  ['bullet_5', 'Bullet 5', /bullet\s*0?5\b|\bb5\b/],
+  ['description', 'Description', /descr/],
+];
+const NEW_WORDS = /(new|rewrit|propos|revis|suggest|updat|after|complian|final|approv|recommend)/;
+const OLD_WORDS = /(orig|old|current|before|existing|source)/;
+const norm = (h) => String(h).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+function addRescoreButtons(view) {
+  for (const a of view.card.querySelectorAll('a.sheet-link')) {
+    if (a.nextElementSibling?.classList.contains('rescore-btn')) continue;
+    const b = el('button', 'btn rescore-btn', '↻ Re-score from sheet');
+    b.type = 'button';
+    b.title = 'Read this sheet, merge the rewrites into your listings CSV and score them again';
+    b.onclick = () => rescoreFromSheet(a.href);
+    a.after(b);
+    state.lastSheet = a.href;
+  }
+}
+
+async function rescoreFromSheet(url) {
+  if (state.busy) return;
+  addUser('Re-score from the review sheet');
+  const v = addBot();
+  v.card.innerHTML = '<div class="thinking"><span class="dots"><i></i><i></i><i></i></span><span>Reading the review sheet…</span></div>';
+  try {
+    const res = await fetch(`/api/sheet?url=${encodeURIComponent(url)}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      v.card.innerHTML = '';
+      const box = el('div', 'md');
+      box.appendChild(el('p', '', `<b>Couldn't read the sheet.</b> ${esc(body.error || `HTTP ${res.status}`)}`));
+      const row = el('div', 'flow-choices');
+      const up = el('button', 'btn', 'Upload the sheet as CSV');
+      up.onclick = () => { state.pendingSheet = true; $('#fileInput').value = ''; $('#fileInput').click(); };
+      const retry = el('button', 'btn', 'Try again');
+      retry.onclick = () => { v.m.remove(); rescoreFromSheet(url); };
+      row.append(up, retry);
+      box.appendChild(row);
+      v.card.appendChild(box);
+      return;
+    }
+    v.m.remove();
+    await rescoreFromCsv(body.csv, 'review sheet');
+  } catch (err) {
+    showError(v, err);
+  }
+}
+
+// Works out which sheet column holds the rewrite for each listing field.
+function guessMapping(headers, rows) {
+  const H = headers.map(norm);
+  const skuCol = headers[H.findIndex(h => /\b(sku|sku id|skuid|asin)\b/.test(h))] || null;
+  const fieldCol = headers[H.findIndex(h => /^(field|attribute|section|element|listing field)$/.test(h))];
+  const valueCol = headers[H.findIndex(h => NEW_WORDS.test(h) && !OLD_WORDS.test(h) && !/rule|reason|note|change log|confirm|image/.test(h))];
+  // Long layout: one row per SKU and field, e.g. SKU | Field | Original | Rewrite
+  if (fieldCol && valueCol) return { layout: 'long', skuCol, fieldCol, valueCol };
+  // Wide layout: one column per field, prefer the rewritten one.
+  const map = {};
+  for (const [key, , re] of REWRITE_FIELDS) {
+    const cands = headers.filter((h, i) => re.test(H[i]) && !/rule|reason|note|length|count|score/.test(H[i]));
+    const pick = cands.find(h => NEW_WORDS.test(norm(h)) && !OLD_WORDS.test(norm(h)))
+      || (cands.length === 1 && !OLD_WORDS.test(norm(cands[0])) ? cands[0] : null);
+    map[key] = pick || '';
+  }
+  return { layout: 'wide', skuCol, map };
+}
+
+function fieldKeyOf(label) {
+  const n = norm(label);
+  return REWRITE_FIELDS.find(([, , re]) => re.test(n))?.[0] || null;
+}
+
+// Rewrites per SKU: { sku_id: { title: '...', bullet_1: '...' } }
+function extractRewrites(rows, m) {
+  const out = {};
+  for (const r of rows) {
+    const sku = (r[m.skuCol] || '').trim();
+    if (!sku) continue;
+    if (m.layout === 'long') {
+      const key = fieldKeyOf(r[m.fieldCol]); const val = (r[m.valueCol] || '').trim();
+      if (key && val) (out[sku] ||= {})[key] = val;
+    } else {
+      for (const [key, col] of Object.entries(m.map)) {
+        const val = col ? (r[col] || '').trim() : '';
+        if (val) (out[sku] ||= {})[key] = val;
+      }
+    }
+  }
+  return out;
+}
+
+async function rescoreFromCsv(sheetText, sourceName) {
+  // parseCsv lower-cases headers; keep them as the sheet's column names.
+  const rows = parseCsv(sheetText.replace(/\r\n?/g, '\n'));
+  if (!rows.length) return toast(`No rows found in the ${sourceName}.`);
+  const headers = Object.keys(rows[0]);
+
+  let base = state.flow;
+  if (!base) {
+    const text = await loadCsvText().catch(() => null);
+    if (text) {
+      const brows = parseCsv(text);
+      base = { name: state.csv?.name || 'listings.csv', text, rows: brows, header: Object.keys(brows[0] || {}), hasClient: true };
+    }
+  }
+  const guess = guessMapping(headers, rows);
+
+  hideWelcome();
+  const v = addBot();
+  const md = el('div', 'md flow');
+  md.appendChild(el('div', 'flow-head', `<b>Read the ${esc(sourceName)}</b><span class="muted">${rows.length} rows · ${headers.length} columns</span>`));
+  if (!base) md.appendChild(el('p', 'flow-warn', 'The original listings CSV isn’t available in this chat, so only columns present in the sheet can be used. Start the audit from this app to re-score with the full listing data.'));
+
+  // Mapping table the user can adjust
+  const opts = (sel) => `<option value="">— not in sheet —</option>${headers.map(h => `<option ${h === sel ? 'selected' : ''}>${esc(h)}</option>`).join('')}`;
+  const form = el('div', 'map-form');
+  form.innerHTML = guess.layout === 'long'
+    ? `<p class="muted small">One row per SKU and field.</p>
+       <label>SKU column <select data-k="skuCol">${opts(guess.skuCol)}</select></label>
+       <label>Field column <select data-k="fieldCol">${opts(guess.fieldCol)}</select></label>
+       <label>Rewritten text column <select data-k="valueCol">${opts(guess.valueCol)}</select></label>`
+    : `<label>SKU column <select data-k="skuCol">${opts(guess.skuCol)}</select></label>
+       ${REWRITE_FIELDS.map(([key, label]) => `<label>${label} <select data-f="${key}">${opts(guess.map[key])}</select></label>`).join('')}`;
+  md.appendChild(el('p', 'flow-q', '<b>Which sheet columns hold the rewrites?</b>'));
+  md.appendChild(form);
+  const status = el('p', 'muted small rescore-status');
+  md.appendChild(status);
+  const actions = el('div', 'flow-choices');
+  const go = el('button', 'btn btn-primary', 'Re-score');
+  const dl = el('button', 'btn', 'Download CSV');
+  actions.append(go, dl);
+  md.appendChild(actions);
+  v.card.innerHTML = ''; v.card.appendChild(md);
+  scrollDown();
+
+  const current = () => {
+    const m = { layout: guess.layout, map: {} };
+    form.querySelectorAll('select').forEach(s => { if (s.dataset.k) m[s.dataset.k] = s.value; else m.map[s.dataset.f] = s.value; });
+    return m;
+  };
+  const build = () => {
+    const m = current();
+    if (!m.skuCol) return { error: 'Choose the SKU column.' };
+    const rewrites = extractRewrites(rows, m);
+    const skus = Object.keys(rewrites);
+    if (!skus.length) return { error: 'No rewritten text found with these columns.' };
+    const fields = [...new Set(skus.flatMap(id => Object.keys(rewrites[id])))];
+    let header, merged;
+    if (base) {
+      header = base.header;
+      merged = base.rows.map(r => rewrites[r.sku_id] ? { ...r, ...rewrites[r.sku_id] } : r);
+    } else {
+      header = ['sku_id', 'is_client', ...REWRITE_FIELDS.map(f => f[0])];
+      merged = skus.map(id => ({ sku_id: id, is_client: 'TRUE', ...rewrites[id] }));
+    }
+    const matched = base ? skus.filter(id => base.rows.some(r => r.sku_id === id)) : skus;
+    return { rewrites, skus, matched, fields, header, merged };
+  };
+  const refresh = () => {
+    const r = build();
+    go.disabled = dl.disabled = !!r.error || !r.matched.length;
+    status.innerHTML = r.error ? esc(r.error)
+      : `Rewrites for <b>${r.matched.length}</b> SKU${r.matched.length === 1 ? '' : 's'} (${esc(r.matched.join(', '))}) · fields: ${esc(r.fields.map(f => REWRITE_FIELDS.find(x => x[0] === f)?.[1] || f).join(', '))}`
+        + (base && r.skus.length > r.matched.length ? ` · <span class="flow-warn-inline">${r.skus.length - r.matched.length} SKU(s) not in your listings CSV</span>` : '');
+  };
+  form.addEventListener('change', refresh);
+  refresh();
+
+  const csvOf = (r) => [r.header.map(cell).join(','), ...r.merged.map(row => r.header.map(h => cell(row[h])).join(','))].join('\n');
+  const mergedName = () => `${(base?.name || 'listings.csv').replace(/\.csv$/i, '')}-rewritten.csv`;
+  dl.onclick = () => {
+    const r = build(); if (r.error) return;
+    const a = el('a'); a.href = URL.createObjectURL(new Blob([csvOf(r)], { type: 'text/csv' })); a.download = mergedName();
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  go.onclick = async () => {
+    const r = build(); if (r.error || state.busy) return;
+    form.querySelectorAll('select').forEach(s => { s.disabled = true; });
+    go.disabled = true;
+    const flow = { name: mergedName(), header: r.header, rows: r.merged };
+    const picked = r.matched.map(id => {
+      const row = r.merged.find(x => x.sku_id === id) || {};
+      return { sku_id: id, brand: row.brand || id, group: row.competitor_group || '' };
+    });
+    const label = picked.length === 1 ? picked[0].brand : picked.length === 2 ? picked.map(c => c.brand).join(' and ') : `${picked.length} client SKUs`;
+    state.csv = { name: flow.name, text: csvOf(r) };
+    await flowAudit(picked, label, { flow, rescore: true, before: state.lastScores || null });
+  };
 }

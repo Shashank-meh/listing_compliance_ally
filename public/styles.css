@@ -389,7 +389,7 @@ a.file-chip:hover { border-color: var(--accent); }
 .score-card.work .sc-num, .score-card.work .sc-band, .score-work { color: var(--major); }
 .score-card.good .sc-num, .score-card.good .sc-band, .score-good { color: var(--ok); }
 .summary-table td { vertical-align: middle; }
-.summary-table .top-issue { white-space: normal !important; min-width: 220px; }
+.summary-table .top-issue { white-space: normal !important; min-width: 160px; }
 .btn.deep-dive { padding: 5px 11px; font-size: 12.5px; white-space: nowrap; }
 .brand[role="button"] { cursor: pointer; border-radius: 10px; }
 .brand[role="button"]:hover .brand-name { color: var(--accent-text); }
@@ -446,3 +446,14 @@ a.file-chip:hover { border-color: var(--accent); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; padding: 10px 12px; font-size: 13.5px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; font-weight: 550; }
 .sheet-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* ---- Re-score from sheet ---- */
+.rescore-btn { margin-left: 8px; padding: 7px 12px; font-size: 13px; vertical-align: middle; }
+.map-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 14px; margin: 6px 0 10px; }
+.map-form > p { grid-column: 1 / -1; margin: 0; }
+.map-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.map-form select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; }
+.rescore-status { margin: 4px 0 10px; }
+.flow-warn-inline { color: var(--major); }
+.sc-delta { font-size: 12px; font-weight: 650; margin-top: 2px; }
+.sc-delta.up { color: var(--ok); } .sc-delta.down { color: var(--crit); }

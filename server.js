@@ -23,6 +23,7 @@ const { runAction, missingConfig } = await import('./lib/simplai.js');
 const { decodeCsv, csvHeaders } = await import('./lib/csvlink.js');
 const { uploadCsv, readCsv, storageHealth } = await import('./lib/upload.js');
 const { checkSkuImages, imageChecksEnabled } = await import('./lib/images.js');
+const { readSheetCsv } = await import('./lib/sheets.js');
 const missing = missingConfig();
 if (missing.length) {
   console.error(`Missing config: ${missing.join(', ')}. Copy .env.example to .env and fill it in.`);
@@ -97,6 +98,10 @@ http.createServer(async (req, res) => {
   const link = req.method === 'GET' && csvLinkParams(url);
   if (link) return serveCsvLink(req, res, link);
   if (url.pathname === '/api/health') return send(res, 200, { runtime: 'server.js', storage: await storageHealth(), imageVision: imageChecksEnabled() ? 'configured' : 'missing ANTHROPIC_API_KEY' });
+  if (req.method === 'GET' && url.pathname === '/api/sheet') {
+    const { status, body } = await readSheetCsv(url.searchParams.get('url'));
+    return send(res, status, body);
+  }
   if (req.method === 'POST' && url.pathname === '/api/images') {
     try {
       const body = await readBody(req);

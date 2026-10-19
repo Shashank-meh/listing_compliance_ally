@@ -46,6 +46,13 @@ This runs in the app (`lib/images.js`), not the SimplAI agent:
 - **Judged by Claude vision** (`claude-opus-5-5`): main image free of text/logos/badges, props, cropping, real photo, sharpness; secondary images free of promotional badges.
 Map checks to your rulebook IDs in `RULE_IDS` in `lib/images.js`.
 
+## Re-score from the review sheet
+When the agent shares a Google Sheet, **Re-score from sheet** reads it (`lib/sheets.js`, via Google's CSV
+export, so the sheet must be shared as "Anyone with the link can view"; otherwise upload the sheet as CSV).
+The app matches the SKU and rewritten title / bullets / description columns (you can adjust the mapping),
+merges the rewrites into the original listings CSV, offers the merged CSV for download, and sends it to the
+agent to score again, showing before → after.
+
 ## Run locally
 ```bash
 cp .env.example .env   # fill in your keys
