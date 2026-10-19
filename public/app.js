@@ -170,7 +170,8 @@ const LONG_REPLY = 700;
 const TABLE_PREVIEW_ROWS = 5;
 
 function structure(wrap, text) {
-  wrap.querySelectorAll('table').forEach(trimTable);
+  wrap.querySelectorAll('table').forEach(reshapeTable);
+  wrap.querySelectorAll('table').forEach(t => trimTable(t));
   if (text.length < LONG_REPLY) return;
 
   // Agents often use a bold line instead of a heading: treat it as one.
@@ -1237,3 +1238,56 @@ function setStep(n) {
     li.classList.toggle('current', k === n);
   });
 }
+
+// ---------- wide tables ----------
+// The agent's benchmark comes back as one wide row of "Client X" /
+// "Competitor median X" columns. Pivot those into Measure | Client |
+// Competitor median | Gap, and turn any other wide 1–3 row table into a
+// label/value list, so nothing gets squeezed into unreadable columns.
+const PAIR_CLIENT = /^client'?s?\s+(.+)$/i;
+const PAIR_COMP = /^competitor(?:s|\s+group)?\s+(?:median|avg|average)\s+(.+)$/i;
+// Measures where a smaller number is better.
+const LOWER_IS_BETTER = /violation|critical|error|issue|finding|title length/i;
+
+function reshapeTable(table) {
+  const head = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+  const rows = [...table.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent.trim()));
+  if (head.length < 6 || !rows.length || rows.length > 3) return;
+
+  const pairs = [];
+  head.forEach((h, i) => {
+    const m = h.match(PAIR_CLIENT);
+    if (!m) return;
+    const key = m[1].toLowerCase();
+    const j = head.findIndex(x => (x.match(PAIR_COMP)?.[1] || '').toLowerCase() === key);
+    if (j >= 0) pairs.push({ label: cap(m[1]), ci: i, mi: j });
+  });
+  const used = new Set(pairs.flatMap(p => [p.ci, p.mi]));
+  const others = head.map((h, i) => i).filter(i => !used.has(i));
+  const out = el('div', 'reshaped');
+
+  for (const r of rows) {
+    const card = el('div', 'compare-card');
+    const meta = others.map(i => r[i] ? `<span><span class="muted">${esc(head[i])}</span> <b>${esc(tidyNum(r[i]))}</b></span>` : '').join('');
+    if (pairs.length >= 2) {
+      card.innerHTML = `${meta ? `<div class="compare-meta">${meta}</div>` : ''}
+        <table class="compare"><thead><tr><th>Measure</th><th>Client</th><th>Competitor median</th><th>Gap</th></tr></thead><tbody>${pairs.map(p => {
+          const c = num(r[p.ci]), m = num(r[p.mi]);
+          let gap = '<span class="muted">–</span>';
+          if (c != null && m != null) {
+            const d = c - m, worse = LOWER_IS_BETTER.test(p.label) ? d > 0 : d < 0;
+            gap = d === 0 ? '<span class="muted">Even</span>' : `<span class="gap ${worse ? 'worse' : 'better'}">${d > 0 ? '▲' : '▼'} ${tidyNum(String(Math.abs(Math.round(d * 10) / 10)))}</span>`;
+          }
+          return `<tr><td>${esc(p.label)}</td><td><b>${esc(tidyNum(r[p.ci]))}</b></td><td>${esc(tidyNum(r[p.mi]))}</td><td>${gap}</td></tr>`;
+        }).join('')}</tbody></table>`;
+    } else {
+      card.innerHTML = `<dl class="kv">${head.map((h, i) => `<dt>${esc(h)}</dt><dd>${esc(tidyNum(r[i]))}</dd>`).join('')}</dl>`;
+    }
+    out.appendChild(card);
+  }
+  (table.closest('.table-wrap') || table).replaceWith(out);
+}
+
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const num = (v) => { const n = parseFloat(String(v).replace(/[,%]/g, '')); return Number.isFinite(n) ? n : null; };
+const tidyNum = (v) => /^-?\d+\.0+$/.test(String(v).trim()) ? String(v).trim().replace(/\.0+$/, '') : v;
