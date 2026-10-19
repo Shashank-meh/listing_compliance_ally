@@ -1583,9 +1583,14 @@ async function rescoreFromCsv(sheetText, sourceName) {
   const build = () => {
     const m = current();
     if (!m.skuCol) return { error: 'Choose the SKU column.' };
-    const rewrites = extractRewrites(rows, m);
+    const all = extractRewrites(rows, m);
+    if (!Object.keys(all).length) return { error: 'No rewritten text found with these columns.' };
+    // The review sheet keeps rows from earlier runs: only use the SKUs this audit covered.
+    const scope = state.auditPicked?.picked?.map(c => c.sku_id);
+    const rewrites = scope ? Object.fromEntries(Object.entries(all).filter(([id]) => scope.includes(id))) : all;
+    const ignored = Object.keys(all).filter(id => !(id in rewrites));
     const skus = Object.keys(rewrites);
-    if (!skus.length) return { error: 'No rewritten text found with these columns.' };
+    if (!skus.length) return { error: `The sheet has no rewrites for ${scope.join(', ')}, the SKU${scope.length === 1 ? '' : 's'} you audited.` };
     const fields = [...new Set(skus.flatMap(id => Object.keys(rewrites[id])))];
     let header, merged;
     if (base) {
@@ -1606,13 +1611,14 @@ async function rescoreFromCsv(sheetText, sourceName) {
     const matched = (base ? skus.filter(id => base.rows.some(r => r.sku_id === id)) : skus).filter(isClient);
     const missing = base ? skus.filter(id => !base.rows.some(r => r.sku_id === id)) : [];
     const usedFields = [...new Set(matched.flatMap(id => Object.keys(rewrites[id])))];
-    return { rewrites, skus, matched, missing, fields: usedFields, header, merged };
+    return { rewrites, skus, matched, missing, ignored, fields: usedFields, header, merged };
   };
   const refresh = () => {
     const r = build();
     go.disabled = dl.disabled = !!r.error || !r.matched.length;
     status.innerHTML = r.error ? esc(r.error)
       : `Rewrites for <b>${r.matched.length}</b> SKU${r.matched.length === 1 ? '' : 's'} (${esc(r.matched.join(', '))}) · fields: ${esc(r.fields.map(f => REWRITE_FIELDS.find(x => x[0] === f)?.[1] || f).join(', '))}`
+        + (r.ignored.length ? ` · <span class="muted">skipped ${r.ignored.length} other SKU${r.ignored.length === 1 ? '' : 's'} in the sheet (${esc(r.ignored.slice(0, 3).join(', '))}${r.ignored.length > 3 ? '…' : ''}), not in this audit</span>` : '')
         + (r.missing.length ? ` · <span class="flow-warn-inline">${r.missing.length} SKU${r.missing.length === 1 ? '' : 's'} not in your listings CSV (${esc(r.missing.slice(0, 3).join(', '))}${r.missing.length > 3 ? '…' : ''})</span>` : '');
   };
   form.addEventListener('change', refresh);
