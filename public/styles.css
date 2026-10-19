@@ -1,7 +1,7 @@
 :root {
-  --bg: #f7f7fb;
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f2f1f8;
+  --surface-2: #f4f4f7;
   --border: #e4e2ee;
   --text: #1b1a24;
   --muted: #6b6880;
@@ -20,17 +20,7 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111018; --surface: #1a1924; --surface-2: #23212f; --border: #2f2c3e;
-    --text: #ecebf4; --muted: #a09cb5; --accent: #8b6dff; --accent-soft: #2a2348; --accent-text: #b8a6ff;
-    --user-bubble: #6d4aff;
-    --crit: #ff8a80; --crit-bg: #3a1a1a; --major: #fdb022; --major-bg: #3a2a10;
-    --minor: #b3bccb; --minor-bg: #262a33; --ok: #6ce9a6; --ok-bg: #12301f;
-    --shadow: 0 1px 2px rgba(0,0,0,.3);
-    color-scheme: dark;
-  }
-}
+/* Always light: white background regardless of the system theme. */
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -502,3 +492,9 @@ a.file-chip:hover { border-color: var(--accent); }
 .panel, #togglePanel, #closePanel { display: none !important; }
 .app, .app.has-summary { grid-template-columns: 248px minmax(0, 1fr); }
 @media (max-width: 760px) { .app, .app.has-summary { grid-template-columns: minmax(0, 1fr); } }
+
+/* White theme: sidebar sits on a faint grey so the two areas stay distinct. */
+html { color-scheme: light; }
+body { background: #ffffff; }
+.sidebar { background: #fafafb; border-right: 1px solid var(--border); }
+.panel { background: #ffffff; }
