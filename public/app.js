@@ -174,6 +174,7 @@ const TABLE_PREVIEW_ROWS = 5;
 function structure(wrap, text) {
   wrap.querySelectorAll('table').forEach(reshapeTable);
   themeChips(wrap);
+  insightNotes(wrap);
   wrap.querySelectorAll('table').forEach(t => trimTable(t));
   if (text.length < LONG_REPLY) return;
 
@@ -1417,6 +1418,74 @@ function themeChips(wrap) {
     }
     p.remove();
   }
+}
+
+// "How it compares:", "Competitor themes…:", "Risky claims…:", "Notes:" — a
+// label line followed by a list — fold into buttons that open on demand.
+const INSIGHT_KINDS = [
+  { kind: 'risk', re: /risk|claim|avoid|caution/i, icon: '⚠', short: 'Risky claims' },
+  { kind: 'themes', re: /theme|gap|not cover|missing/i, icon: '◎', short: 'Competitor themes' },
+  { kind: 'compare', re: /compar|versus|vs\.?|benchmark|stack/i, icon: '⇄', short: 'How it compares' },
+  { kind: 'notes', re: /note|advice|tip|observation/i, icon: 'ℹ', short: 'Notes' },
+];
+const BAD_RE = /violation|trail|behind|\bno\b|lacks?|missing|shorter|longer|fewer|lower|weaker|below/i;
+const GOOD_RE = /\bmore\b|higher|ahead|better|stronger|above|leads?/i;
+
+function insightNotes(wrap) {
+  const isLabel = (n) => n?.tagName === 'P' && n.textContent.trim().length <= 90 && /:\s*$/.test(n.textContent.trim());
+  const groups = [];
+  for (const label of [...wrap.querySelectorAll(':scope > p')]) {
+    if (!isLabel(label) || !/^(UL|OL)$/.test(label.nextElementSibling?.tagName || '')) continue;
+    const list = label.nextElementSibling;
+    // Plain sentences right after the list ("These are observations only…") belong to it.
+    const extra = [];
+    for (let n = list.nextElementSibling; n?.tagName === 'P' && !isLabel(n) && n.textContent.length < 240 && !n.querySelector('a'); n = n.nextElementSibling) extra.push(n);
+    const title = label.textContent.trim().replace(/:\s*$/, '');
+    const type = INSIGHT_KINDS.find(k => k.re.test(title)) || { kind: 'other', icon: '•', short: title };
+    const items = [...list.children].filter(li => li.tagName === 'LI');
+    // A sentence on the line right after the last bullet is a footnote, not part of it.
+    const tail = items.at(-1)?.innerHTML.split(/<br\s*\/?>/i);
+    if (tail?.length > 1) { items.at(-1).innerHTML = tail[0]; const f = el('p', '', tail.slice(1).join(' ').trim()); if (f.textContent) extra.unshift(f); }
+    groups.push({ label, list, extra, title, ...type, items });
+  }
+  if (!groups.length) return;
+  const box = el('div', 'insights');
+  const bar = el('div', 'insight-bar');
+  const panel = el('div', 'insight-panel hidden');
+  box.append(bar, panel);
+  groups[0].label.before(box);
+  for (const g of groups) {
+    const b = el('button', `insight-btn ${g.kind}`, `<span class="ib-icon" aria-hidden="true">${g.icon}</span>${esc(g.title.length > 34 ? g.short : g.title)}<span class="ib-n">${g.items.length}</span>`);
+    b.type = 'button';
+    b.title = g.title;
+    b.setAttribute('aria-expanded', 'false');
+    b.onclick = () => {
+      const open = b.classList.contains('on');
+      bar.querySelectorAll('.insight-btn').forEach(x => { x.classList.remove('on'); x.setAttribute('aria-expanded', 'false'); });
+      if (open) { panel.classList.add('hidden'); return; }
+      b.classList.add('on'); b.setAttribute('aria-expanded', 'true');
+      panel.className = `insight-panel ${g.kind}`;
+      panel.innerHTML = '';
+      panel.appendChild(el('div', 'ip-title', esc(g.title)));
+      panel.appendChild(renderInsight(g));
+      for (const p of g.extra) panel.appendChild(el('p', 'ip-foot', p.innerHTML));
+    };
+    bar.appendChild(b);
+    g.label.remove(); g.list.remove(); g.extra.forEach(p => p.remove());
+  }
+}
+
+function renderInsight(g) {
+  if (g.kind === 'themes') return el('div', 'ip-chips', g.items.map(li => `<span class="theme">${li.innerHTML.replace(/\.\s*$/, '')}</span>`).join(''));
+  const ul = el('ul', 'ip-list');
+  for (const li of g.items) {
+    let html = li.innerHTML;
+    // "Title note: …" → bold lead-in
+    html = html.replace(/^([^:<]{2,40}):\s*/, '<b>$1</b> ');
+    const tone = g.kind === 'compare' ? (BAD_RE.test(li.textContent) ? 'bad' : GOOD_RE.test(li.textContent) ? 'good' : 'neutral') : g.kind === 'risk' ? 'warn' : 'neutral';
+    ul.appendChild(el('li', tone, html));
+  }
+  return ul;
 }
 
 // ahead / level / close / behind, from the client's gap to the median.
