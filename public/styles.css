@@ -391,3 +391,5 @@ a.file-chip:hover { border-color: var(--accent); }
 .summary-table td { vertical-align: middle; }
 .summary-table .top-issue { white-space: normal !important; min-width: 220px; }
 .btn.deep-dive { padding: 5px 11px; font-size: 12.5px; white-space: nowrap; }
+.brand[role="button"] { cursor: pointer; border-radius: 10px; }
+.brand[role="button"]:hover .brand-name { color: var(--accent-text); }

@@ -858,7 +858,9 @@ function init() {
     send(v);
   });
   $('#stop').onclick = () => state.abort?.abort();
-  $('#newChat').onclick = newChat;
+  // The app name goes back to the start screen for a new audit.
+  $('#brandHome').onclick = newChat;
+  $('#brandHome').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); newChat(); } };
   $('#refreshHistory').onclick = loadHistory;
   $('#toggleSidebar').onclick = () => $('#app').classList.toggle('sidebar-open');
   $('#togglePanel').onclick = () => $('#app').classList.toggle('panel-open');
