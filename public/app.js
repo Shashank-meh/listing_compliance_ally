@@ -1587,7 +1587,8 @@ async function rescoreFromCsv(sheetText, sourceName) {
     if (!Object.keys(all).length) return { error: 'No rewritten text found with these columns.' };
     // The review sheet keeps rows from earlier runs: only use the SKUs this audit covered.
     const scope = state.auditPicked?.picked?.map(c => c.sku_id);
-    const rewrites = scope ? Object.fromEntries(Object.entries(all).filter(([id]) => scope.includes(id))) : all;
+    if (!scope?.length) return { error: 'Run the audit in this chat first, so the re-score covers only the SKUs you picked.' };
+    const rewrites = Object.fromEntries(Object.entries(all).filter(([id]) => scope.includes(id)));
     const ignored = Object.keys(all).filter(id => !(id in rewrites));
     const skus = Object.keys(rewrites);
     if (!skus.length) return { error: `The sheet has no rewrites for ${scope.join(', ')}, the SKU${scope.length === 1 ? '' : 's'} you audited.` };
