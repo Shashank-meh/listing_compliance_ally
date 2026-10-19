@@ -468,8 +468,10 @@ function fillBot(view, text, raw, steps = []) {
 // Tool calls the agent made for this reply, e.g. "audit-file → Nothing to Score".
 function renderSteps(steps) {
   const box = el('div', 'tool-steps');
-  for (const s of steps) {
+  for (let s of steps) {
     const failed = s.output == null || /nothing to score|error|fail|invalid/i.test(s.output);
+    // A sheet link gets its own button below the reply; summarise it here.
+    if (s.output && /docs\.google\.com\/spreadsheets/.test(s.output)) s = { ...s, output: 'Saved to a Google Sheet' };
     const url = s.args?.csv_url;
     const note = typeof url === 'string' && url.startsWith('data:') ? 'csv_url was inline data, not a hosted link' : null;
     const row = el('div', `tool-step ${failed ? 'warn' : 'ok'}`,
@@ -607,7 +609,7 @@ async function send(text, opts = {}) {
   text = text.trim();
   if (!text || state.busy) return;
   // Report and rewrite tools need the audit's run_id; the agent only sees it if we pass it on.
-  if (state.runId && !/run_id/i.test(text)) text += `${RUN_MARK}${state.runId} for any report or rewrite tool.`;
+  if (state.runId && !/run_id/i.test(text)) text += `${RUN_MARK}${state.runId} for any report or rewrite tool, and include any Google Sheet link a tool returns.`;
   state.asked.add(text);
   if (state.file) {
     const f = state.file;
@@ -669,6 +671,7 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
         rememberRunId(reply, r.data);
         const ctx = state.expectSummary; state.expectSummary = null; state.thinkingLabel = null;
         if (!(ctx && reply && renderSummary(view, reply, ctx, r.data))) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
+        addSheetLinks(view, r.data, reply);
         state.agentFollowups = turn?.followups || [];
         scrollDown();
         return;
@@ -757,6 +760,7 @@ async function openConversation(id, title) {
         if (t.reply || t.steps.length) {
           const v = addBot();
           if (!(t.user?.includes(FORMAT_MARK) && renderSummary(v, t.reply, {}))) fillBot(v, t.reply || '_No reply._', undefined, t.steps);
+          addSheetLinks(v, t, t.reply);
         }
       }
       state.agentFollowups = turns.at(-1)?.followups || [];
@@ -1291,3 +1295,32 @@ function reshapeTable(table) {
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const num = (v) => { const n = parseFloat(String(v).replace(/[,%]/g, '')); return Number.isFinite(n) ? n : null; };
 const tidyNum = (v) => /^-?\d+\.0+$/.test(String(v).trim()) ? String(v).trim().replace(/\.0+$/, '') : v;
+
+// ---------- Google Sheet links ----------
+// The agent's report and rewrite tools return a Google Sheet. The link may
+// sit in the tool output or attachments rather than the reply text, so look
+// through the whole response and show any sheet the message doesn't already.
+const SHEET_RE = /https:\/\/docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})[^\s"'<>)\]\\]*/g;
+function findSheetLinks(raw) {
+  let text;
+  try { text = typeof raw === 'string' ? raw : JSON.stringify(raw); } catch { return []; }
+  text = text.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+  const seen = new Map();
+  for (const m of text.matchAll(SHEET_RE)) if (!seen.has(m[1])) seen.set(m[1], m[0].replace(/[.,;:]+$/, ''));
+  return [...seen.entries()].map(([id, url]) => ({ id, url }));
+}
+
+function addSheetLinks(view, raw, replyText) {
+  // Only clickable links count as shown (a URL inside a tool step's text doesn't).
+  const shown = new Set([...view.card.querySelectorAll('a[href*="docs.google.com/spreadsheets"]')].flatMap(a => findSheetLinks(a.href).map(l => l.id)));
+  const links = findSheetLinks(raw).concat(findSheetLinks(replyText || '')).filter(l => !shown.has(l.id) && (shown.add(l.id), true));
+  if (!links.length) return;
+  const box = el('div', 'sheet-links md');
+  for (const l of links) {
+    const tab = l.url.match(/[#&?]gid=(\d+)/);
+    const a = el('a', 'sheet-link', `<span class="sheet-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg></span><span>Open review sheet</span><span aria-hidden="true">↗</span>`);
+    a.href = l.url; a.target = '_blank'; a.rel = 'noopener'; a.title = tab ? `${l.url} (tab ${tab[1]})` : l.url;
+    box.appendChild(a);
+  }
+  view.card.appendChild(box);
+}

@@ -445,3 +445,4 @@ a.file-chip:hover { border-color: var(--accent); }
 .gap.worse { color: var(--crit); } .gap.better { color: var(--ok); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; padding: 10px 12px; font-size: 13.5px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; font-weight: 550; }
+.sheet-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
