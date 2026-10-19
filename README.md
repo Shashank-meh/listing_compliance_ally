@@ -25,6 +25,8 @@ change names its rule.
    | `SIMPLAI_DEVICE_ID` | optional, defaults to `simplai` |
    | `SIMPLAI_BASE_URL` | optional, defaults to `https://edge-service.simplai.ai` |
    | `ANTHROPIC_API_KEY` | for **Check images** (Claude vision); without it only the measured checks run |
+   | `RESEND_API_KEY` | to email the brand for approval with the CSV attached ([resend.com](https://resend.com)); without it the app opens a draft in your email app |
+   | `EMAIL_FROM` | sender for approval emails, on a domain verified in Resend, e.g. `Listing Ally <ally@yourbrand.com>` |
    | `PUBLIC_BASE_URL` | optional, the public address CSV links should use (defaults to the Vercel production domain) |
 
 3. Deploy. Every push to `main` redeploys automatically.
@@ -45,6 +47,12 @@ This runs in the app (`lib/images.js`), not the SimplAI agent:
 - **Measured in code:** white background (edge pixels), product fill (≥85% of the frame), resolution (≥1000 px), file type, image count (5–7).
 - **Judged by Claude vision** (`claude-opus-5-5`): main image free of text/logos/badges, props, cropping, real photo, sharpness; secondary images free of promotional badges.
 Map checks to your rulebook IDs in `RULE_IDS` in `lib/images.js`.
+
+## The journey
+Upload → Audit → Deep-dive → Benchmark → Rewrite → Re-score → Approve. The stepper in the top bar shows
+progress and runs a step when clicked; after each reply the next step is offered first. **Approve** emails the
+brand the rewritten CSV with before → after scores, the confirm-with-brand items and the review sheet link.
+**Upload to Amazon** is shown as coming soon.
 
 ## Re-score from the review sheet
 When the agent shares a Google Sheet, **Re-score from sheet** reads it (`lib/sheets.js`, via Google's CSV

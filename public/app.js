@@ -579,7 +579,9 @@ function renderFollowups() {
   const ours = FOLLOWUPS.filter(f => !state.asked.has(f.prompt));
   const images = (state.csv || state.csvUrl) && !state.imagesChecked
     ? [{ label: 'Check images', run: runImageCheck, special: true }] : [];
-  const extra = state.extraFollowups || [];
+  const next = nextStep();
+  const nextItem = next && next.key !== 'audit' ? [{ label: `Next: ${next.cta}`, run: () => runStep(next.key), special: true, next: true }] : [];
+  const extra = [...nextItem, ...(state.extraFollowups || [])];
   const items = [...extra.filter(f => !state.asked.has(f.prompt)), ...images, ...agent, ...ours].slice(0, 4);
   if (!items.length) return;
   const box = el('div', 'suggestions');
@@ -587,7 +589,7 @@ function renderFollowups() {
   box.appendChild(el('div', 'suggestions-label', 'Suggested next steps'));
   const row = el('div', 'suggestion-row');
   for (const f of items) {
-    const c = el('button', f.special ? 'chip special' : f.agent ? 'chip agent' : 'chip', f.special ? `${IMG_ICON}${esc(f.label)}` : esc(f.label));
+    const c = el('button', f.next ? 'chip special next' : f.special ? 'chip special' : f.agent ? 'chip agent' : 'chip', f.next ? `${esc(f.label)} →` : f.special ? `${IMG_ICON}${esc(f.label)}` : esc(f.label));
     if (f.agent) c.title = 'Suggested by Ally';
     c.onclick = () => (f.run ? f.run() : send(f.prompt));
     row.appendChild(c);
@@ -600,6 +602,7 @@ function renderFollowups() {
 // ---------- chat flow ----------
 function setBusy(b) {
   state.busy = b;
+  renderStepper();
   $('#send').classList.toggle('hidden', b);
   $('#stop').classList.toggle('hidden', !b);
   renderFollowups();
@@ -608,6 +611,8 @@ function setBusy(b) {
 async function send(text, opts = {}) {
   text = text.trim();
   if (!text || state.busy) return;
+  // A message that performs a journey step completes it when the reply arrives.
+  state.pendingStep = state.pendingStep || stepForPrompt(text);
   // Report and rewrite tools need the audit's run_id; the agent only sees it if we pass it on.
   if (state.runId && !/run_id/i.test(text)) text += `${RUN_MARK}${state.runId} for any report or rewrite tool, and include any Google Sheet link a tool returns.`;
   state.asked.add(text);
@@ -669,6 +674,7 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
         const turn = msgs && toTurns(msgs).pop();
         const reply = (turn && turn.reply) || extractReply(r.data, userText);
         rememberRunId(reply, r.data);
+        if (state.pendingStep && reply) { markDone(state.pendingStep); state.pendingStep = null; }
         const ctx = state.expectSummary; state.expectSummary = null; state.thinkingLabel = null;
         if (!(ctx && reply && renderSummary(view, reply, ctx, r.data))) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
         addSheetLinks(view, r.data, reply);
@@ -803,7 +809,9 @@ function reset() {
   state.flow = null;
   state.scoreLocked = false;
   state.runId = null;
-  setStep(0);
+  state.done = new Set(); state.pendingStep = null; state.auditPicked = null;
+  state.originalScores = null; state.rescoredScores = null; state.rewrittenCsv = null; state.brandNotes = null;
+  renderStepper();
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
   renderPanel();
@@ -828,6 +836,7 @@ function init() {
   const startAudit = () => { state.pendingFlow = true; $('#fileInput').value = ''; $('#fileInput').click(); };
   $('#startAudit').onclick = (e) => { e.stopPropagation(); startAudit(); };
   $('#dropzone').onclick = startAudit;
+  $('#stepper').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b && !b.disabled) runStep(b.dataset.step); });
   $('#trySample').onclick = async () => {
     try {
       const res = await fetch('/sample-listings.csv');
@@ -1054,7 +1063,7 @@ async function flowUpload(file) {
   }));
   const groups = new Set(rows.map(r => r.competitor_group).filter(Boolean));
   state.flow = { name: file.name, text, rows, header, clients, hasClient };
-  setStep(2);
+  state.done = new Set(['upload']); renderStepper();
   state.csv = { name: file.name, text };
   state.imagesChecked = false;
 
@@ -1091,7 +1100,7 @@ async function flowUpload(file) {
       b.onclick = () => {
         if (state.busy) return;
         choices.querySelectorAll('button').forEach(x => { x.disabled = true; x.classList.toggle('chosen', x === b); });
-        setStep(3);
+        renderStepper();
         flowAudit(o.pick, o.pick.length === 1 ? o.label : o.pick.length === 2 ? o.pick.map(c => c.brand).join(' and ') : `all ${o.pick.length} client SKUs`);
       };
       choices.appendChild(b);
@@ -1120,6 +1129,7 @@ async function flowAudit(picked, label, opts = {}) {
     + 'One block per client SKU (is_client = TRUE), one table row per finding.'
     + `\n\nListings CSV (${file.name}, ${file.rows} rows), use as csv_url: ${url}`;
   state.hasData = true;
+  if (!opts.rescore) state.auditPicked = { picked, label };
   await send(message, {
     title: `${opts.rescore ? 'Re-score' : 'Audit'} · ${label}`,
     thinking: `${opts.rescore ? 'Re-scoring' : 'Auditing'} ${subset.length} record${subset.length === 1 ? '' : 's'} (${picked.length} client, ${competitors} competitor${competitors === 1 ? '' : 's'})…`,
@@ -1212,8 +1222,9 @@ function renderSummary(view, reply, ctx, raw) {
   const scored = results.filter(r => r.score != null);
   if (scored.length) { state.score = { after: Math.round(scored.reduce((a, r) => a + r.score, 0) / scored.length) }; state.scoreLocked = true; }
   renderPanel();
-  setStep(4);
   state.lastScores = Object.fromEntries(results.filter(r => r.score != null).map(r => [r.sku_id, r.score]));
+  if (ctx.before) { state.rescoredScores = { ...state.lastScores }; markDone('rescore'); }
+  else { state.originalScores = { ...state.lastScores }; markDone('audit'); }
   state.extraFollowups = results.map(r => ({ label: `Deep-dive ${brandOf(r.sku_id) || r.sku_id}`, prompt: deepDivePrompt(r.sku_id, brandOf(r.sku_id)) }));
   return true;
 }
@@ -1233,19 +1244,6 @@ function findRunId(text) {
 function rememberRunId(reply, raw) {
   const id = findRunId(reply) || (raw ? findRunId(JSON.stringify(raw).replace(/\\"/g, '"')) : null);
   if (id) state.runId = id;
-}
-
-// Progress through the guided flow, shown in the top bar (0 hides it).
-// Steps before the current one are marked done.
-function setStep(n) {
-  const bar = $('#stepper');
-  if (!bar) return;
-  bar.classList.toggle('hidden', !n);
-  bar.querySelectorAll('li').forEach(li => {
-    const k = Number(li.dataset.step);
-    li.classList.toggle('done', k < n);
-    li.classList.toggle('current', k === n);
-  });
 }
 
 // ---------- wide tables ----------
@@ -1539,6 +1537,185 @@ async function rescoreFromCsv(sheetText, sourceName) {
     });
     const label = picked.length === 1 ? picked[0].brand : picked.length === 2 ? picked.map(c => c.brand).join(' and ') : `${picked.length} client SKUs`;
     state.csv = { name: flow.name, text: csvOf(r) };
+    state.rewrittenCsv = { name: flow.name, text: csvOf(r) };
+    state.brandNotes = Object.fromEntries(rows.filter(x => r.matched.includes((x[current().skuCol] || '').trim())).map(x => [
+      (x[current().skuCol] || '').trim(), { confirm: x.confirm_with_brand || '', changes: x.change_log || '' }]));
     await flowAudit(picked, label, { flow, rescore: true, before: state.lastScores || null });
   };
+}
+
+// ---------- the seven-step journey ----------
+// Upload → Audit → Deep-dive → Benchmark → Rewrite → Re-score → Approve.
+// The top-bar stepper shows progress and runs a step when clicked; after each
+// reply the next step is offered first in the suggestions.
+const STEPS = [
+  { key: 'upload', cta: 'Upload listings' },
+  { key: 'audit', cta: 'Run the audit' },
+  { key: 'deepdive', cta: 'Deep-dive a SKU' },
+  { key: 'benchmark', cta: 'Benchmark vs competitors' },
+  { key: 'rewrite', cta: 'Rewrite the listings' },
+  { key: 'rescore', cta: 'Re-score the rewrite' },
+  { key: 'approve', cta: 'Send to brand for approval' },
+];
+
+function stepForPrompt(text) {
+  if (/^Deep-dive/i.test(text)) return 'deepdive';
+  if (/^(Benchmark|How does each client SKU compare)/i.test(text)) return 'benchmark';
+  if (/^(Rewrite|Show the compliant rewrite)/i.test(text)) return 'rewrite';
+  return null;
+}
+
+const auditLabel = () => state.auditPicked?.label || 'the audited SKUs';
+const benchmarkPrompt = () => `Benchmark ${auditLabel()} against the competitor median${DETAIL_MARK}score, image count, headed bullets, description length, title length and critical violations for each client SKU.`;
+const rewritePrompt = () => `Rewrite ${auditLabel()}${DETAIL_MARK}a compliant title, 5 bullets and description for each client SKU, with the rule ID for every change, and save it to the review sheet.`;
+
+function nextStep() {
+  if (!state.done?.has('audit')) return null;
+  return STEPS.find(s => !state.done.has(s.key)) || null;
+}
+
+function markDone(key) {
+  (state.done ||= new Set()).add(key);
+  renderStepper();
+  renderFollowups();
+}
+
+function stepAvailable(key) {
+  const d = state.done || new Set();
+  if (key === 'upload') return true;
+  if (key === 'audit') return d.has('upload');
+  if (key === 'rescore') return d.has('audit') && Boolean(state.lastSheet);
+  if (key === 'approve') return d.has('audit');
+  return d.has('audit');
+}
+
+function renderStepper() {
+  const bar = $('#stepper');
+  if (!bar) return;
+  const d = state.done || new Set();
+  bar.classList.toggle('hidden', !d.size && !state.flow);
+  const current = STEPS.find(s => !d.has(s.key))?.key;
+  bar.querySelectorAll('[data-step]').forEach(b => {
+    const k = b.dataset.step;
+    b.parentElement.classList.toggle('done', d.has(k));
+    b.parentElement.classList.toggle('current', k === current);
+    b.disabled = !stepAvailable(k) || state.busy;
+    b.title = d.has(k) ? 'Done · click to run again' : stepAvailable(k) ? 'Click to run this step' : k === 'rescore' ? 'Rewrite first: re-scoring reads the review sheet' : 'Run the audit first';
+  });
+}
+
+function runStep(key) {
+  if (state.busy) return;
+  const clients = state.auditPicked?.picked || state.flow?.clients || [];
+  if (key === 'upload') { state.pendingFlow = true; $('#fileInput').value = ''; $('#fileInput').click(); return; }
+  if (key === 'audit') {
+    if (!state.flow) return runStep('upload');
+    const all = state.flow.clients;
+    return flowAudit(all, all.length === 1 ? all[0].brand : all.length === 2 ? all.map(c => c.brand).join(' and ') : `all ${all.length} client SKUs`);
+  }
+  if (key === 'deepdive') { const c = clients[0]; return send(c ? deepDivePrompt(c.sku_id, c.brand) : 'Deep-dive the audited SKUs'); }
+  if (key === 'benchmark') return send(benchmarkPrompt());
+  if (key === 'rewrite') return send(rewritePrompt());
+  if (key === 'rescore') {
+    if (state.lastSheet) return rescoreFromSheet(state.lastSheet);
+    state.pendingSheet = true; $('#fileInput').value = ''; $('#fileInput').click(); return;
+  }
+  if (key === 'approve') return openApproval();
+}
+
+// ---------- approval email ----------
+function approvalDraft() {
+  const clients = state.auditPicked?.picked || state.flow?.clients || [];
+  const brands = [...new Set(clients.map(c => c.brand))].join(', ') || 'your listings';
+  const before = state.originalScores || {}, after = state.rescoredScores || {};
+  const lines = clients.map(c => {
+    const b = before[c.sku_id], a = after[c.sku_id];
+    return `- ${c.brand} (${c.sku_id}): ${b != null ? Math.round(b) : '–'}${a != null ? ` → ${Math.round(a)}` : ''}/100`;
+  });
+  const notes = Object.entries(state.brandNotes || {}).filter(([, n]) => n.confirm).map(([id, n]) => `- ${clients.find(c => c.sku_id === id)?.brand || id}: ${n.confirm}`);
+  const text = [
+    'Hi,',
+    '',
+    `The Amazon listings for ${brands} have been audited against Amazon's content guidelines and rewritten. Please review and reply to approve, or tell us what to change.`,
+    '',
+    'Compliance score (before → after rewrite):',
+    ...lines,
+    ...(notes.length ? ['', 'Please confirm these facts:', ...notes] : []),
+    ...(state.lastSheet ? ['', `Review sheet with every change and the rule behind it: ${state.lastSheet}`] : []),
+    '',
+    state.rewrittenCsv ? `The rewritten listings are attached (${state.rewrittenCsv.name}).` : '',
+    '',
+    'Thanks',
+  ].join('\n');
+  return { subject: `For approval: rewritten Amazon listings for ${brands}`, text };
+}
+
+function openApproval() {
+  hideWelcome();
+  addUser('Send to brand for approval');
+  const v = addBot();
+  const draft = approvalDraft();
+  const file = state.rewrittenCsv;
+  const md = el('div', 'md flow approval');
+  md.appendChild(el('div', 'flow-head', '<b>Send to brand for approval</b><span class="muted">Email the rewritten listings for sign-off, or publish them to Amazon.</span>'));
+  if (!file) md.appendChild(el('p', 'flow-warn', 'There’s no rewritten CSV yet. Re-score with the review sheet first so the brand gets the final listings.'));
+  const form = el('div', 'approval-form');
+  form.innerHTML = `
+    <label>To <input type="email" multiple id="apTo" placeholder="brand.manager@brand.com" autocomplete="email"></label>
+    <label>Cc · optional <input type="email" multiple id="apCc" placeholder="you@agency.com"></label>
+    <label class="wide">Subject <input type="text" id="apSubject"></label>
+    <label class="wide">Message <textarea id="apText" rows="12"></textarea></label>`;
+  md.appendChild(form);
+  form.querySelector('#apSubject').value = draft.subject;
+  form.querySelector('#apText').value = draft.text;
+  if (file) md.appendChild(fileChip(file.name, `${csvRows(file.text)} rows · attached`));
+  const status = el('p', 'muted small approval-status');
+  const actions = el('div', 'flow-choices approval-actions');
+  const sendBtn = el('button', 'btn btn-primary', 'Send for approval');
+  const amazon = el('button', 'btn amazon-btn', 'Upload to Amazon <span class="soon">Coming soon</span>');
+  amazon.disabled = true;
+  amazon.title = 'Publishing straight to Seller Central / Vendor Central is coming soon';
+  actions.append(sendBtn, amazon);
+  md.append(actions, status);
+  v.card.innerHTML = ''; v.card.appendChild(md);
+  scrollDown();
+  form.querySelector('#apTo').focus();
+
+  sendBtn.onclick = async () => {
+    const to = form.querySelector('#apTo').value.trim();
+    const cc = form.querySelector('#apCc').value.trim();
+    const subject = form.querySelector('#apSubject').value.trim();
+    const text = form.querySelector('#apText').value;
+    if (!to) { status.textContent = 'Add the brand contact’s email address.'; form.querySelector('#apTo').focus(); return; }
+    sendBtn.disabled = true; status.textContent = 'Sending…';
+    try {
+      const res = await fetch('/api/email', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, cc, subject, text, attachment: file ? { filename: file.name, content: file.text } : null }) });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 501) return draftInMailApp({ to, cc, subject, text, file, status, sendBtn });
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      md.querySelectorAll('input, textarea').forEach(x => { x.disabled = true; });
+      status.className = 'approval-done';
+      status.innerHTML = `✓ Sent to ${esc(body.to.join(', '))}${body.cc?.length ? ` (cc ${esc(body.cc.join(', '))})` : ''}${file ? ` with ${esc(file.name)} attached` : ''}.`;
+      markDone('approve');
+    } catch (err) {
+      status.textContent = `Couldn't send: ${err.message}`;
+      sendBtn.disabled = false;
+    }
+  };
+}
+
+// Without an email service: download the CSV and open a pre-filled draft.
+function draftInMailApp({ to, cc, subject, text, file, status, sendBtn }) {
+  if (file) {
+    const a = el('a'); a.href = URL.createObjectURL(new Blob([file.text], { type: 'text/csv' })); a.download = file.name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  const q = new URLSearchParams({ subject, body: text });
+  if (cc) q.set('cc', cc);
+  window.location.href = `mailto:${encodeURIComponent(to)}?${q.toString().replace(/\+/g, '%20')}`;
+  status.className = 'approval-done';
+  status.innerHTML = `Opened a draft in your email app${file ? ` and downloaded <b>${esc(file.name)}</b>. Attach it to the draft before sending` : ''}. (To send straight from here, add a RESEND_API_KEY in Vercel.)`;
+  sendBtn.disabled = false;
+  markDone('approve');
 }

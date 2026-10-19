@@ -24,6 +24,7 @@ const { decodeCsv, csvHeaders } = await import('./lib/csvlink.js');
 const { uploadCsv, readCsv, storageHealth } = await import('./lib/upload.js');
 const { checkSkuImages, imageChecksEnabled } = await import('./lib/images.js');
 const { readSheetCsv } = await import('./lib/sheets.js');
+const { sendApprovalEmail, emailEnabled } = await import('./lib/email.js');
 const missing = missingConfig();
 if (missing.length) {
   console.error(`Missing config: ${missing.join(', ')}. Copy .env.example to .env and fill it in.`);
@@ -38,7 +39,7 @@ function send(res, status, obj) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', c => { raw += c; if (raw.length > 1e6) req.destroy(); });
+    req.on('data', c => { raw += c; if (raw.length > 6e6) req.destroy(); });
     req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (e) { reject(e); } });
     req.on('error', reject);
   });
@@ -97,7 +98,11 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const link = req.method === 'GET' && csvLinkParams(url);
   if (link) return serveCsvLink(req, res, link);
-  if (url.pathname === '/api/health') return send(res, 200, { runtime: 'server.js', storage: await storageHealth(), imageVision: imageChecksEnabled() ? 'configured' : 'missing ANTHROPIC_API_KEY' });
+  if (url.pathname === '/api/health') return send(res, 200, { runtime: 'server.js', storage: await storageHealth(), imageVision: imageChecksEnabled() ? 'configured' : 'missing ANTHROPIC_API_KEY', email: emailEnabled() ? 'configured' : 'missing RESEND_API_KEY' });
+  if (req.method === 'POST' && url.pathname === '/api/email') {
+    try { const { status, body } = await sendApprovalEmail(await readBody(req)); return send(res, status, body); }
+    catch (err) { return send(res, 400, { error: 'Bad request', detail: err.message }); }
+  }
   if (req.method === 'GET' && url.pathname === '/api/sheet') {
     const { status, body } = await readSheetCsv(url.searchParams.get('url'));
     return send(res, status, body);

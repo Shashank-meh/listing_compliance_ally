@@ -457,3 +457,43 @@ a.file-chip:hover { border-color: var(--accent); }
 .flow-warn-inline { color: var(--major); }
 .sc-delta { font-size: 12px; font-weight: 650; margin-top: 2px; }
 .sc-delta.up { color: var(--ok); } .sc-delta.down { color: var(--crit); }
+
+/* ---- Seven-step stepper ---- */
+.stepper li { padding: 0; }
+.stepper li::before { content: none; }
+.stepper button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: inherit; font: inherit; padding: 4px 9px; border-radius: 999px; cursor: pointer; }
+.stepper button:disabled { cursor: default; opacity: .55; }
+.stepper button:not(:disabled):hover { background: var(--surface-2); }
+.stepper { counter-reset: step; gap: 2px; }
+.stepper button::before { counter-increment: step; content: counter(step); width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--surface-2); }
+.stepper li.done button { color: var(--ok); }
+.stepper li.done button::before { content: '✓'; background: var(--ok-bg); color: var(--ok); }
+.stepper li.current button { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; opacity: 1; }
+.stepper li.current button::before { background: var(--accent); color: #fff; }
+@media (max-width: 1100px) { .stepper li:not(.current) button { font-size: 0; gap: 0; padding: 4px; } }
+.chip.next { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chip.next:hover { color: #fff; filter: brightness(1.08); }
+
+/* ---- How it works (7 steps) ---- */
+.how.how7 { grid-template-columns: repeat(7, 1fr); }
+.how.how7 li { padding-right: 10px; }
+.how.how7 li b { font-size: 13px; }
+.how.how7 li span:not(.how-n) { font-size: 12px; }
+@media (max-width: 1100px) { .how.how7 { grid-template-columns: repeat(4, 1fr); row-gap: 18px; } .how.how7 li::after { display: none; } }
+@media (max-width: 900px) { .how.how7 { grid-template-columns: 1fr; } }
+
+/* ---- Approval ---- */
+.approval-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 8px 0 12px; }
+.approval-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.approval-form label.wide { grid-column: 1 / -1; }
+.approval-form input, .approval-form textarea { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font: inherit; font-size: 13.5px; }
+.approval-form textarea { resize: vertical; line-height: 1.5; }
+.approval-form input:focus, .approval-form textarea:focus { outline: none; border-color: var(--accent); }
+.approval-actions { margin-top: 12px; }
+.amazon-btn .soon { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; background: var(--major-bg); color: var(--major); padding: 2px 6px; border-radius: 6px; margin-left: 6px; }
+.amazon-btn:disabled { opacity: .8; cursor: not-allowed; }
+.approval-done { color: var(--ok); font-weight: 600; margin-top: 10px; }
+@media (max-width: 760px) { .approval-form { grid-template-columns: 1fr; } }
+.stepper li.done::before, .stepper li.current::before, .stepper li::before { content: none !important; display: none !important; }
+.topbar:has(.stepper:not(.hidden)) .topbar-title { display: none; }
+.topbar .stepper { flex: 1; justify-content: center; flex-wrap: wrap; }

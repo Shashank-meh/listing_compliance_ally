@@ -38,7 +38,7 @@
         </button>
         <div class="topbar-title" id="chatTitle">New audit</div>
         <ol class="stepper hidden" id="stepper" aria-label="Audit progress">
-          <li data-step="1">Upload</li><li data-step="2">Choose</li><li data-step="3">Scores</li><li data-step="4">Deep-dive</li>
+          <li><button data-step="upload">Upload</button></li><li><button data-step="audit">Audit</button></li><li><button data-step="deepdive">Deep-dive</button></li><li><button data-step="benchmark">Benchmark</button></li><li><button data-step="rewrite">Rewrite</button></li><li><button data-step="rescore">Re-score</button></li><li><button data-step="approve">Approve</button></li>
         </ol>
         <div class="topbar-actions">
           <button class="icon-btn only-mobile" id="togglePanel" aria-label="Show audit panel">
@@ -59,11 +59,14 @@
           <p class="sample-line muted small">No file yet? <button class="link-btn" id="trySample" type="button">Try it with sample data</button> · 2 client brands, 6 competitors</p>
 
           <h2 class="how-title">How it works</h2>
-          <ol class="how">
-            <li><span class="how-n">1</span><div><b>Upload your CSV</b><span>Your listings and their competitors. Mark your own with <code>is_client = TRUE</code> and group rivals with <code>competitor_group</code>.</span></div></li>
-            <li><span class="how-n">2</span><div><b>Choose what to audit</b><span>Pick one client brand, or all of them. Only the chosen brands and their competitors are sent.</span></div></li>
-            <li><span class="how-n">3</span><div><b>Get scores</b><span>Each SKU is scored out of 100 against 29 Amazon content rules, with critical, major and minor issues counted.</span></div></li>
-            <li><span class="how-n">4</span><div><b>Deep-dive &amp; fix</b><span>Open any SKU for every finding with the rule it breaks, a competitor comparison, a compliant rewrite and image checks.</span></div></li>
+          <ol class="how how7">
+            <li><span class="how-n">1</span><div><b>Upload</b><span>Your listings CSV: client SKUs and their competitors.</span></div></li>
+            <li><span class="how-n">2</span><div><b>Audit</b><span>Pick brands; each SKU is scored against 29 Amazon rules.</span></div></li>
+            <li><span class="how-n">3</span><div><b>Deep-dive</b><span>Every finding for a SKU, with the rule it breaks.</span></div></li>
+            <li><span class="how-n">4</span><div><b>Benchmark</b><span>How each SKU compares with its competitors.</span></div></li>
+            <li><span class="how-n">5</span><div><b>Rewrite</b><span>Compliant copy saved to a review sheet.</span></div></li>
+            <li><span class="how-n">6</span><div><b>Re-score</b><span>Score the rewrite and see before → after.</span></div></li>
+            <li><span class="how-n">7</span><div><b>Approve</b><span>Email the brand the new CSV, or upload to Amazon (soon).</span></div></li>
           </ol>
           <details class="columns-help">
             <summary>Which columns does the CSV need?</summary>
