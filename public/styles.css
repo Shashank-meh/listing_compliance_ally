@@ -393,3 +393,38 @@ a.file-chip:hover { border-color: var(--accent); }
 .btn.deep-dive { padding: 5px 11px; font-size: 12.5px; white-space: nowrap; }
 .brand[role="button"] { cursor: pointer; border-radius: 10px; }
 .brand[role="button"]:hover .brand-name { color: var(--accent-text); }
+
+/* ---- Start screen: how it works ---- */
+.sample-line { margin: -4px 0 0; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent-text); font: inherit; font-weight: 600; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
+.how-title { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 30px 0 12px; font-weight: 600; }
+.how { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; counter-reset: none; }
+.how li { position: relative; display: flex; flex-direction: column; gap: 10px; padding-right: 18px; }
+.how li:not(:last-child)::after { content: ''; position: absolute; top: 14px; left: 36px; right: 8px; height: 1px; background: var(--border); }
+.how-n { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); display: grid; place-items: center; font-weight: 700; font-size: 13px; position: relative; z-index: 1; }
+.how li b { display: block; font-size: 14px; margin-bottom: 3px; }
+.how li span:not(.how-n) { font-size: 12.5px; color: var(--muted); line-height: 1.5; display: block; }
+.how code, .columns-help code { font-size: 11.5px; background: var(--surface-2); padding: 0 4px; border-radius: 4px; }
+.columns-help { margin-top: 22px; font-size: 13px; }
+.columns-help summary { cursor: pointer; color: var(--muted); }
+.columns-help summary:hover { color: var(--text); }
+.columns-help p { margin: 8px 0 0; color: var(--muted); line-height: 1.7; }
+.columns-help a { color: var(--accent-text); }
+.steps { display: none; }
+@media (max-width: 900px) {
+  .how { grid-template-columns: 1fr; gap: 16px; }
+  .how li { flex-direction: row; padding-right: 0; }
+  .how li::after { display: none; }
+  .how-n { flex: none; }
+}
+
+/* ---- Top-bar stepper ---- */
+.stepper { list-style: none; display: flex; gap: 4px; margin: 0; padding: 0; font-size: 12px; }
+.stepper li { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); padding: 4px 10px 4px 6px; border-radius: 999px; }
+.stepper li::before { content: attr(data-step); width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; background: var(--surface-2); }
+.stepper li.done { color: var(--ok); }
+.stepper li.done::before { content: '✓'; background: var(--ok-bg); color: var(--ok); }
+.stepper li.current { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; }
+.stepper li.current::before { background: var(--accent); color: #fff; }
+@media (max-width: 760px) { .stepper li:not(.current) { font-size: 0; padding: 4px; gap: 0; } }

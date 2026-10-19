@@ -37,6 +37,9 @@
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <div class="topbar-title" id="chatTitle">New audit</div>
+        <ol class="stepper hidden" id="stepper" aria-label="Audit progress">
+          <li data-step="1">Upload</li><li data-step="2">Choose</li><li data-step="3">Scores</li><li data-step="4">Deep-dive</li>
+        </ol>
         <div class="topbar-actions">
           <button class="icon-btn only-mobile" id="togglePanel" aria-label="Show audit panel">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
@@ -47,18 +50,25 @@
       <section class="thread" id="thread">
         <div class="welcome" id="welcome">
           <h1>Audit your Amazon listings</h1>
-          <p class="muted">Upload your listings CSV, pick which client SKUs to audit, and Ally scores each one against 29 cited content rules and its competitors. Ask for a deep-dive on any SKU when you want the detail.</p>
+          <p class="muted">Check your client listings against Amazon's content rules, see how they compare with competitors, and get compliant rewrites you can approve.</p>
           <div class="dropzone" id="dropzone" role="button" tabindex="0">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-            <span class="dz-text"><b id="dropzoneTitle">Drop your listings CSV here</b><span class="muted" id="dropzoneSub">Columns: sku_id, is_client, competitor_group, title, bullet_1–5, description, image_urls</span></span>
+            <span class="dz-text"><b id="dropzoneTitle">Drop your listings CSV here</b><span class="muted" id="dropzoneSub">One row per listing: your client SKUs and their competitors</span></span>
             <button class="btn btn-primary start" id="startAudit" type="button">Start audit</button>
           </div>
-          <div class="steps">
-            <div class="step"><span class="step-n">1</span><div><b>Audit</b><span>Rule engine scores every field</span></div></div>
-            <div class="step"><span class="step-n">2</span><div><b>Benchmark</b><span>Compare with 3 competitors</span></div></div>
-            <div class="step"><span class="step-n">3</span><div><b>Rewrite</b><span>Every edit cites a rule ID</span></div></div>
-            <div class="step"><span class="step-n">4</span><div><b>Sign off</b><span>Confirm facts with the brand</span></div></div>
-          </div>
+          <p class="sample-line muted small">No file yet? <button class="link-btn" id="trySample" type="button">Try it with sample data</button> · 2 client brands, 6 competitors</p>
+
+          <h2 class="how-title">How it works</h2>
+          <ol class="how">
+            <li><span class="how-n">1</span><div><b>Upload your CSV</b><span>Your listings and their competitors. Mark your own with <code>is_client = TRUE</code> and group rivals with <code>competitor_group</code>.</span></div></li>
+            <li><span class="how-n">2</span><div><b>Choose what to audit</b><span>Pick one client brand, or all of them. Only the chosen brands and their competitors are sent.</span></div></li>
+            <li><span class="how-n">3</span><div><b>Get scores</b><span>Each SKU is scored out of 100 against 29 Amazon content rules, with critical, major and minor issues counted.</span></div></li>
+            <li><span class="how-n">4</span><div><b>Deep-dive &amp; fix</b><span>Open any SKU for every finding with the rule it breaks, a competitor comparison, a compliant rewrite and image checks.</span></div></li>
+          </ol>
+          <details class="columns-help">
+            <summary>Which columns does the CSV need?</summary>
+            <p><code>sku_id</code>, <code>is_client</code> (TRUE/FALSE), <code>competitor_group</code>, <code>brand</code>, <code>title</code>, <code>bullet_1</code>–<code>bullet_5</code>, <code>description</code>, <code>image_urls</code> (separated by <code>|</code>). <a href="/sample-listings.csv" download>Download the sample</a> to use as a template.</p>
+          </details>
         </div>
       </section>
 

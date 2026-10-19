@@ -798,6 +798,7 @@ function reset() {
   state.flow = null;
   state.scoreLocked = false;
   state.runId = null;
+  setStep(0);
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
   renderPanel();
@@ -822,6 +823,13 @@ function init() {
   const startAudit = () => { state.pendingFlow = true; $('#fileInput').value = ''; $('#fileInput').click(); };
   $('#startAudit').onclick = (e) => { e.stopPropagation(); startAudit(); };
   $('#dropzone').onclick = startAudit;
+  $('#trySample').onclick = async () => {
+    try {
+      const res = await fetch('/sample-listings.csv');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      flowUpload(new File([await res.text()], 'sample-listings.csv', { type: 'text/csv' }));
+    } catch (err) { toast(`Couldn't load the sample: ${err.message}`); }
+  };
   $('#dropzone').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startAudit(); } };
   $('#attach').onclick = () => pickFile();
   $('#fileInput').addEventListener('change', e => {
@@ -1040,6 +1048,7 @@ async function flowUpload(file) {
   }));
   const groups = new Set(rows.map(r => r.competitor_group).filter(Boolean));
   state.flow = { name: file.name, text, rows, header, clients, hasClient };
+  setStep(2);
   state.csv = { name: file.name, text };
   state.imagesChecked = false;
 
@@ -1076,6 +1085,7 @@ async function flowUpload(file) {
       b.onclick = () => {
         if (state.busy) return;
         choices.querySelectorAll('button').forEach(x => { x.disabled = true; x.classList.toggle('chosen', x === b); });
+        setStep(3);
         flowAudit(o.pick, o.pick.length === 1 ? o.label : o.pick.length === 2 ? o.pick.map(c => c.brand).join(' and ') : `all ${o.pick.length} client SKUs`);
       };
       choices.appendChild(b);
@@ -1193,6 +1203,7 @@ function renderSummary(view, reply, ctx, raw) {
   const scored = results.filter(r => r.score != null);
   if (scored.length) { state.score = { after: Math.round(scored.reduce((a, r) => a + r.score, 0) / scored.length) }; state.scoreLocked = true; }
   renderPanel();
+  setStep(4);
   state.extraFollowups = results.map(r => ({ label: `Deep-dive ${brandOf(r.sku_id) || r.sku_id}`, prompt: deepDivePrompt(r.sku_id, brandOf(r.sku_id)) }));
   return true;
 }
@@ -1212,4 +1223,17 @@ function findRunId(text) {
 function rememberRunId(reply, raw) {
   const id = findRunId(reply) || (raw ? findRunId(JSON.stringify(raw).replace(/\\"/g, '"')) : null);
   if (id) state.runId = id;
+}
+
+// Progress through the guided flow, shown in the top bar (0 hides it).
+// Steps before the current one are marked done.
+function setStep(n) {
+  const bar = $('#stepper');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !n);
+  bar.querySelectorAll('li').forEach(li => {
+    const k = Number(li.dataset.step);
+    li.classList.toggle('done', k < n);
+    li.classList.toggle('current', k === n);
+  });
 }
