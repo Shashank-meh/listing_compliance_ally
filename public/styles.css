@@ -497,3 +497,8 @@ a.file-chip:hover { border-color: var(--accent); }
 .stepper li.done::before, .stepper li.current::before, .stepper li::before { content: none !important; display: none !important; }
 .topbar:has(.stepper:not(.hidden)) .topbar-title { display: none; }
 .topbar .stepper { flex: 1; justify-content: center; flex-wrap: wrap; }
+
+/* The audit summary column is removed: scores and rules are shown in the chat. */
+.panel, #togglePanel, #closePanel { display: none !important; }
+.app, .app.has-summary { grid-template-columns: 248px minmax(0, 1fr); }
+@media (max-width: 760px) { .app, .app.has-summary { grid-template-columns: minmax(0, 1fr); } }

@@ -535,7 +535,7 @@ const RULE_GROUPS = { TITLE: 'Title', BULLET: 'Bullets', BUL: 'Bullets', DESC: '
 
 function renderPanel() {
   const hasScore = Boolean(state.score), hasRules = state.ruleCounts.size > 0;
-  $('#app').classList.toggle('has-summary', hasScore || hasRules);
+  // The summary column is no longer shown; scores and rules live in the chat.
   $('#panelEmpty').classList.toggle('hidden', hasScore || hasRules);
   $('#scoreSection').classList.toggle('hidden', !hasScore);
   $('#rulesSection').classList.toggle('hidden', !hasRules);
