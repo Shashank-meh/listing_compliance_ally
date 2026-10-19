@@ -440,10 +440,85 @@ function addBot() {
   return { m, body, card };
 }
 
+// While the agent works: a small animation for the step, rotating lines about
+// what it is checking, a timer and a progress bar that eases towards the end.
+const ACTIVITY = {
+  audit: { title: 'Auditing your listings', expect: 45, tips: [
+    'Reading every title, bullet and description…',
+    'Checking titles: 200-character limit, ALL CAPS, promo words like “Best”…',
+    'Scanning bullets for unproven claims such as “will NEVER break”…',
+    'Looking for guarantees, prices and “buy now” lines Amazon doesn’t allow…',
+    'Counting images: Amazon recommends 5–7 per listing…',
+    'Weighing findings: critical ×3, major ×2, minor ×1…',
+    'Lining each client up against its competitor group…',
+  ] },
+  deepdive: { title: 'Deep-diving the SKU', expect: 40, tips: [
+    'Pulling every finding for this SKU…',
+    'Matching each finding to its rule ID…',
+    'Writing a fix for every finding…',
+    'Comparing it with the competitor median…',
+  ] },
+  benchmark: { title: 'Benchmarking against competitors', expect: 40, tips: [
+    'Finding each client’s competitor group…',
+    'Comparing scores, image counts and headed bullets…',
+    'Measuring title and description length…',
+    'Spotting themes competitors cover that the client doesn’t…',
+  ] },
+  rewrite: { title: 'Rewriting the listings', expect: 70, tips: [
+    'Drafting a compliant title…',
+    'Rewriting the 5 bullets with clear headers…',
+    'Removing claims the data can’t back up…',
+    'Tagging every change with its rule ID…',
+    'Noting facts to confirm with the brand…',
+    'Saving the rewrite to the review sheet…',
+  ] },
+  rescore: { title: 'Re-scoring the rewrite', expect: 45, tips: [
+    'Running the rewritten listings through the rule engine…',
+    'Checking that no rule still fails…',
+    'Working out the before → after scores…',
+  ] },
+  chat: { title: 'Ally is working on it', expect: 30, tips: [
+    'Reading your request…',
+    'Looking through the audit results…',
+    'Putting the answer together…',
+  ] },
+};
+
+const SCENES = {
+  audit: `<div class="scene scene-audit"><div class="doc"><i></i><i></i><i></i><i></i><i></i><span class="scan"></span></div><span class="mark m1">✓</span><span class="mark m2 bad">✕</span><span class="mark m3">✓</span></div>`,
+  deepdive: `<div class="scene scene-deep"><div class="doc"><i></i><i></i><i></i><i></i><i></i></div><span class="lens"></span></div>`,
+  benchmark: `<div class="scene scene-bench"><b class="b1"></b><b class="b2"></b><b class="b3"></b><b class="b4 me"></b></div>`,
+  rewrite: `<div class="scene scene-write"><div class="doc"><i></i><i></i><i></i><i></i></div><span class="pen">✎</span></div>`,
+  rescore: `<div class="scene scene-gauge"><span class="arc"></span><span class="needle"></span><span class="hub"></span></div>`,
+  chat: `<div class="scene scene-chat"><span class="dots"><i></i><i></i><i></i></span></div>`,
+};
+
+function activityKind(text) {
+  if (/^Re-score/i.test(text)) return 'rescore';
+  if (/^Audit/i.test(text)) return 'audit';
+  return stepForPrompt(text) || 'chat';
+}
+
 function setThinking(card, startedAt) {
   const secs = Math.round((Date.now() - startedAt) / 1000);
-  const label = state.thinkingLabel ? `${state.thinkingLabel}` : secs < 4 ? 'Ally is reading your request…' : secs < 20 ? 'Checking the listing against the rules…' : 'Still working — full audits can take a minute…';
-  card.innerHTML = `<div class="thinking"><span class="dots"><i></i><i></i><i></i></span><span>${label}</span><span class="small">${secs}s</span></div>`;
+  const kind = state.thinkingKind || 'chat';
+  const a = ACTIVITY[kind];
+  let box = card.querySelector('.activity');
+  if (!box || box.dataset.kind !== kind) {
+    card.innerHTML = `<div class="activity" data-kind="${kind}">${SCENES[kind]}
+      <div class="act-body">
+        <div class="act-title"><b>${esc(state.thinkingLabel || a.title)}</b><span class="act-time"></span></div>
+        <div class="act-tip"></div>
+        <div class="act-bar"><span></span></div>
+      </div></div>`;
+    box = card.querySelector('.activity');
+  }
+  box.querySelector('.act-time').textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`;
+  const tip = secs > a.expect * 2 ? 'Taking longer than usual. Larger files can take a few minutes…' : a.tips[Math.floor(secs / 4) % a.tips.length];
+  const t = box.querySelector('.act-tip');
+  if (t.textContent !== tip) { t.textContent = tip; t.classList.remove('in'); void t.offsetWidth; t.classList.add('in'); }
+  // Eases towards 95% around the usual duration; never claims to be done.
+  box.querySelector('.act-bar span').style.width = `${Math.round(95 * (1 - Math.exp(-secs / (a.expect * 0.6))))}%`;
 }
 
 function fillBot(view, text, raw, steps = []) {
@@ -635,6 +710,7 @@ async function send(text, opts = {}) {
   const view = addBot();
   state.expectSummary = opts.summary || null;
   state.thinkingLabel = opts.thinking || null;
+  state.thinkingKind = activityKind(text);
   await run(text, view);
 }
 

@@ -566,3 +566,64 @@ body { background: #ffffff; }
 .agent-dialog .kv td { white-space: normal; }
 .agent-dialog .kv td .mono { overflow-wrap: anywhere; }
 .how-auto { margin-top: 22px; }
+
+/* ---- Working animations ---- */
+.activity { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; background: linear-gradient(135deg, var(--accent-soft), transparent 70%); max-width: 560px; }
+.act-body { flex: 1; min-width: 0; }
+.act-title { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 14px; }
+.act-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.act-tip { font-size: 13px; color: var(--muted); margin: 3px 0 9px; min-height: 1.5em; }
+.act-tip.in { animation: tipIn .45s ease; }
+@keyframes tipIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.act-bar { height: 4px; border-radius: 999px; background: var(--surface-2); overflow: hidden; position: relative; }
+.act-bar span { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: var(--accent); transition: width 1s linear; }
+.act-bar span::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent); animation: shimmer 1.6s infinite; }
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+.scene { position: relative; width: 64px; height: 64px; flex: none; }
+.scene .doc { position: absolute; inset: 6px 12px; background: var(--surface); border: 1.5px solid var(--border); border-radius: 6px; padding: 7px 6px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; box-shadow: 0 2px 6px rgba(15,23,42,.06); }
+.scene .doc i { display: block; height: 3px; border-radius: 2px; background: #d6d3e4; }
+.scene .doc i:nth-child(2) { width: 80%; } .scene .doc i:nth-child(4) { width: 65%; } .scene .doc i:nth-child(5) { width: 85%; }
+
+/* audit: a scan line sweeps the page, ticks and crosses pop out */
+.scene-audit .scan { position: absolute; left: 0; right: 0; height: 12px; top: -12px; background: linear-gradient(180deg, transparent, rgba(108, 71, 255, .35)); border-bottom: 2px solid var(--accent); animation: scan 2.2s ease-in-out infinite; }
+@keyframes scan { 0% { top: -12px; } 100% { top: 100%; } }
+.scene .mark { position: absolute; width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; background: var(--ok); opacity: 0; animation: pop 2.2s ease-in-out infinite; }
+.scene .mark.bad { background: #dc2626; }
+.scene .m1 { right: 2px; top: 6px; animation-delay: .4s; } .scene .m2 { right: 0; top: 25px; animation-delay: 1s; } .scene .m3 { right: 4px; top: 44px; animation-delay: 1.6s; }
+@keyframes pop { 0%, 100% { opacity: 0; transform: scale(.4); } 15%, 60% { opacity: 1; transform: scale(1); } 80% { opacity: 0; transform: scale(.8); } }
+
+/* deep-dive: a magnifier wanders over the page */
+.scene-deep .lens { position: absolute; width: 22px; height: 22px; border: 3px solid var(--accent); border-radius: 50%; background: rgba(108, 71, 255, .12); animation: lens 3s ease-in-out infinite; }
+.scene-deep .lens::after { content: ''; position: absolute; width: 3px; height: 11px; background: var(--accent); border-radius: 2px; right: -6px; bottom: -9px; transform: rotate(-45deg); }
+@keyframes lens { 0% { left: 14px; top: 10px; } 33% { left: 30px; top: 22px; } 66% { left: 12px; top: 32px; } 100% { left: 14px; top: 10px; } }
+
+/* benchmark: bars rise and settle, the client bar in brand colour */
+.scene-bench { display: flex; align-items: flex-end; justify-content: center; gap: 5px; padding-bottom: 8px; }
+.scene-bench b { width: 9px; border-radius: 3px 3px 0 0; background: #cfcadf; animation: bar 2.4s ease-in-out infinite; }
+.scene-bench .b1 { height: 30px; } .scene-bench .b2 { height: 42px; animation-delay: .2s; } .scene-bench .b3 { height: 24px; animation-delay: .4s; }
+.scene-bench .me { height: 36px; background: var(--accent); animation-delay: .6s; }
+@keyframes bar { 0%, 100% { transform: scaleY(.45); } 50% { transform: scaleY(1); } }
+.scene-bench b { transform-origin: bottom; }
+
+/* rewrite: lines are typed out while a pen moves along */
+.scene-write .doc i { width: 0; animation: type 3.2s steps(12) infinite; }
+.scene-write .doc i:nth-child(2) { animation-delay: .8s; } .scene-write .doc i:nth-child(3) { animation-delay: 1.6s; } .scene-write .doc i:nth-child(4) { animation-delay: 2.4s; }
+@keyframes type { 0% { width: 0; } 25%, 100% { width: 100%; } }
+.scene-write .pen { position: absolute; font-size: 18px; color: var(--accent); animation: pen 3.2s ease-in-out infinite; }
+@keyframes pen { 0% { left: 18px; top: 6px; } 25% { left: 40px; top: 6px; } 26% { left: 18px; top: 16px; } 50% { left: 40px; top: 16px; } 51% { left: 18px; top: 26px; } 75% { left: 40px; top: 26px; } 76% { left: 18px; top: 36px; } 100% { left: 38px; top: 36px; } }
+
+/* re-score: a gauge needle swings from red towards green */
+.scene-gauge .arc { position: absolute; left: 6px; top: 12px; width: 52px; height: 52px; border-radius: 50%; background: conic-gradient(from 270deg, #dc2626 0deg, #f59e0b 60deg, var(--ok) 120deg, var(--ok) 180deg, transparent 180deg); -webkit-mask: radial-gradient(circle, transparent 17px, #000 18px); mask: radial-gradient(circle, transparent 17px, #000 18px); clip-path: inset(0 0 50% 0); }
+.scene-gauge .needle { position: absolute; left: 31px; top: 18px; width: 2px; height: 20px; background: var(--text); border-radius: 2px; transform-origin: 1px 20px; animation: needle 2.6s cubic-bezier(.5, 0, .3, 1.4) infinite; }
+.scene-gauge .hub { position: absolute; left: 28px; top: 34px; width: 8px; height: 8px; border-radius: 50%; background: var(--text); }
+@keyframes needle { 0% { transform: rotate(-80deg); } 60%, 85% { transform: rotate(60deg); } 100% { transform: rotate(-80deg); } }
+
+.scene-chat { display: grid; place-items: center; }
+.scene-chat .dots i { width: 8px; height: 8px; }
+
+@media (max-width: 760px) { .activity { gap: 12px; padding: 12px; } .scene { transform: scale(.85); margin: -4px; } }
+@media (prefers-reduced-motion: reduce) {
+  .activity *, .activity *::before, .activity *::after { animation: none !important; transition: none !important; }
+  .scene-write .doc i { width: 100%; } .scene .mark { opacity: 1; }
+}
