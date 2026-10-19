@@ -29,6 +29,11 @@
         </button>
       </div>
       <ul class="history" id="history"><li class="muted small">Loading…</li></ul>
+      <button class="agent-card" id="agentCard" type="button" title="The SimplAI agent this app talks to">
+        <span class="agent-dot" id="agentDot" aria-hidden="true"></span>
+        <span class="agent-meta"><span class="agent-label">SimplAI agent</span><b id="agentName">Checking…</b><span class="mono" id="agentShort"></span></span>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
     </aside>
 
     <!-- Main chat -->
@@ -107,6 +112,14 @@
     </main>
 
     <!-- Right panel: what's been cited in this conversation -->
+    <dialog class="agent-dialog" id="agentDialog" aria-labelledby="agentDialogTitle">
+      <div class="agent-dialog-head">
+        <h2 id="agentDialogTitle">Agent in use</h2>
+        <button class="icon-btn" id="agentClose" aria-label="Close">✕</button>
+      </div>
+      <div id="agentBody"></div>
+    </dialog>
+
     <aside class="panel" id="panel">
       <div class="panel-head">
         <h2>Audit summary</h2>

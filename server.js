@@ -19,7 +19,7 @@ function loadEnv(file) {
 }
 loadEnv(path.join(ROOT, '.env'));
 
-const { runAction, missingConfig } = await import('./lib/simplai.js');
+const { runAction, missingConfig, agentInfo } = await import('./lib/simplai.js');
 const { decodeCsv, csvHeaders } = await import('./lib/csvlink.js');
 const { uploadCsv, readCsv, storageHealth } = await import('./lib/upload.js');
 const { checkSkuImages, imageChecksEnabled } = await import('./lib/images.js');
@@ -98,6 +98,7 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const link = req.method === 'GET' && csvLinkParams(url);
   if (link) return serveCsvLink(req, res, link);
+  if (req.method === 'GET' && url.pathname === '/api/agent') { const { status, body } = await agentInfo(); return send(res, status, body); }
   if (url.pathname === '/api/health') return send(res, 200, { runtime: 'server.js', storage: await storageHealth(), imageVision: imageChecksEnabled() ? 'configured' : 'missing ANTHROPIC_API_KEY', email: emailEnabled() ? 'configured' : 'missing RESEND_API_KEY' });
   if (req.method === 'POST' && url.pathname === '/api/email') {
     try { const { status, body } = await sendApprovalEmail(await readBody(req)); return send(res, status, body); }

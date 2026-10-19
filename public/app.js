@@ -680,6 +680,7 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
         rememberRunId(reply, r.data);
         if (state.pendingStep && reply) { markDone(state.pendingStep); state.pendingStep = null; }
         const ctx = state.expectSummary; state.expectSummary = null; state.thinkingLabel = null;
+        logTools(turn?.steps);
         const summarised = Boolean(ctx && reply && renderSummary(view, reply, ctx, r.data));
         if (!summarised) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
         addSheetLinks(view, r.data, reply);
@@ -769,6 +770,7 @@ async function openConversation(id, title) {
       const turns = toTurns(msgs);
       for (const t of turns) {
         if (t.reply) rememberRunId(t.reply, t.steps);
+        logTools(t.steps);
         if (t.user) { addUser(t.user); state.asked.add(t.user); if (hasCsv(t.user)) { state.hasData = true; rememberCsv(t.user); } }
         if (t.reply || t.steps.length) {
           const v = addBot();
@@ -819,6 +821,7 @@ function reset() {
   state.done = new Set(); state.pendingStep = null; state.auditPicked = null;
   state.originalScores = null; state.rescoredScores = null; state.rewrittenCsv = null; state.brandNotes = null;
   autoReset();
+  state.toolLog = [];
   renderStepper();
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
@@ -913,6 +916,10 @@ function init() {
 
   renderPanel();
   loadHistory();
+  loadAgent();
+  $('#agentCard').onclick = openAgent;
+  $('#agentClose').onclick = () => $('#agentDialog').close();
+  $('#agentDialog').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
   // Always start on a fresh audit; past chats are one click away in the sidebar.
   input.focus();
 }
@@ -1832,6 +1839,90 @@ function renderAutobar() {
   skip.title = skip.disabled ? 'The audit is needed for every later step' : `Skip ${STEP_NAME[target]} and go to the next step`;
   pause.classList.toggle('hidden', !on || state.autoFinished);
   pause.textContent = state.autoPaused ? 'Resume' : 'Pause';
+}
+
+// ---------- agent in use ----------
+// Shows which SimplAI agent the app talks to (from the server's config), a live
+// check against the SimplAI backend, and the tools the agent called in this chat.
+async function loadAgent() {
+  try {
+    const res = await fetch('/api/agent');
+    state.agent = await res.json();
+  } catch (err) {
+    state.agent = { error: err.message };
+  }
+  const a = state.agent;
+  const ok = a.backend?.ok;
+  $('#agentDot').className = `agent-dot ${ok ? 'ok' : a.backend || a.error || a.missing?.length ? 'bad' : ''}`;
+  $('#agentName').textContent = a.name || 'Listing Compliance Ally';
+  $('#agentShort').textContent = a.agentId ? (a.agentId.length > 22 ? `${a.agentId.slice(0, 20)}…` : a.agentId) : 'not configured';
+  return a;
+}
+
+function logTools(steps) {
+  if (!steps?.length) return;
+  state.toolLog ||= [];
+  for (const s of steps) {
+    const failed = s.output == null || /nothing to score|load_error|error|fail|invalid/i.test(s.output);
+    state.toolLog.push({ name: s.name, args: s.args || {}, failed, output: s.output, at: new Date() });
+  }
+}
+
+function argSummary(args) {
+  return Object.entries(args).map(([k, v]) => {
+    let t = typeof v === 'string' ? v : JSON.stringify(v);
+    if (/^https?:\/\//.test(t)) { try { const u = new URL(t); t = `${u.host}/…/${u.pathname.split('/').pop()}`; } catch { /* keep */ } }
+    if (t.startsWith('data:')) t = 'inline data';
+    return `${k}: ${t.length > 60 ? t.slice(0, 60) + '…' : t}`;
+  }).join(' · ');
+}
+
+async function openAgent() {
+  const dlg = $('#agentDialog');
+  const body = $('#agentBody');
+  body.innerHTML = '<p class="muted small">Checking the SimplAI backend…</p>';
+  dlg.showModal();
+  const a = await loadAgent();
+  if (a.error) { body.innerHTML = `<p class="flow-warn">Couldn’t reach this app’s server: ${esc(a.error)}</p>`; return; }
+  const b = a.backend;
+  const status = a.missing?.length ? `<span class="sev critical">Not configured</span> <span class="muted">missing ${esc(a.missing.join(', '))}</span>`
+    : !b ? '<span class="muted">Not checked</span>'
+    : b.ok ? `<span class="sev pass">Connected</span> <span class="muted">HTTP ${b.status} · ${b.latencyMs} ms</span>`
+    : `<span class="sev critical">Not reachable</span> <span class="muted">${esc(b.status ? `HTTP ${b.status}` : b.error || 'no response')}</span>`;
+  const row = (k, v, copy) => v ? `<tr><th>${k}</th><td><span class="${copy ? 'mono' : ''}">${esc(v)}</span>${copy ? ` <button class="btn copy-btn" data-copy="${esc(v)}">Copy</button>` : ''}</td></tr>` : '';
+  const reported = Object.entries(b?.reported || {}).filter(([k]) => k !== 'id' || b.reported.id !== a.agentId);
+  const tools = state.toolLog || [];
+  const counts = {};
+  for (const t of tools) (counts[t.name] ||= { n: 0, failed: 0 }), counts[t.name].n++, t.failed && counts[t.name].failed++;
+
+  body.innerHTML = `
+    <div class="agent-hero"><span class="agent-dot big ${b?.ok ? 'ok' : 'bad'}"></span><div><b>${esc(a.name || 'Listing Compliance Ally')}</b><div>${status}</div></div></div>
+    <table class="kv">
+      ${row('Agent ID', a.agentId, true)}
+      ${row('Tenant ID', a.tenantId)}
+      ${row('User ID', a.userId)}
+      ${row('Device ID', a.deviceId)}
+      ${row('API', a.apiBase)}
+      ${row('API key', a.apiKey)}
+      ${reported.map(([k, v]) => row(`Backend reports ${esc(k)}`, v)).join('')}
+    </table>
+    ${a.dashboardUrl ? `<p><a class="btn" href="${esc(a.dashboardUrl)}" target="_blank" rel="noopener">Open in SimplAI ↗</a></p>` : ''}
+    <h3>This chat</h3>
+    <table class="kv">
+      ${row('Conversation', state.conversationId, true) || '<tr><th>Conversation</th><td class="muted">None yet</td></tr>'}
+      ${row('Audit run_id', state.runId, true)}
+    </table>
+    <h3>Tools the agent called <span class="muted small">${tools.length ? `${tools.length} call${tools.length === 1 ? '' : 's'}` : ''}</span></h3>
+    ${tools.length ? `
+      <div class="tool-chips">${Object.entries(counts).map(([n, c]) => `<span class="tool-chip ${c.failed ? 'warn' : ''}">${esc(n)} ×${c.n}${c.failed ? ` · ${c.failed} failed` : ''}</span>`).join('')}</div>
+      <ol class="tool-log">${tools.slice().reverse().map(t => `<li class="${t.failed ? 'warn' : 'ok'}"><span class="ts-icon">${t.failed ? '!' : '✓'}</span><div><b>${esc(t.name)}</b> <span class="muted small">${t.at.toLocaleTimeString()}</span>${Object.keys(t.args).length ? `<div class="mono small muted">${esc(argSummary(t.args))}</div>` : ''}</div></li>`).join('')}</ol>`
+      : '<p class="muted small">No tool calls yet. Tool calls appear here when the agent’s replies include them (audit-file, sku-report, …).</p>'}
+    <h3>Endpoints</h3>
+    <ul class="endpoints mono small">${Object.values(a.endpoints || {}).map(e => `<li>${esc(e)}</li>`).join('')}</ul>
+    <p class="muted small">Every audit, report and rewrite in this app is done by this agent. The app only sends it messages and shows its replies.</p>`;
+  body.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.onclick = async () => { try { await navigator.clipboard.writeText(btn.dataset.copy); btn.textContent = 'Copied'; } catch { btn.textContent = 'Copy failed'; } setTimeout(() => { btn.textContent = 'Copy'; }, 1500); };
+  });
 }
 
 // ---------- approval email ----------

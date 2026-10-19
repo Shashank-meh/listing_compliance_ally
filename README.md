@@ -22,6 +22,8 @@ change names its rule.
    | `SIMPLAI_TENANT_ID` | e.g. `11` |
    | `SIMPLAI_USER_ID` | e.g. `72` |
    | `SIMPLAI_AGENT_ID` | e.g. `agent-…` |
+   | `SIMPLAI_AGENT_NAME` | optional · name shown in the **Agent in use** card |
+   | `SIMPLAI_AGENT_URL` | optional · link to the agent in the SimplAI dashboard (adds an "Open in SimplAI" button) |
    | `SIMPLAI_DEVICE_ID` | optional, defaults to `simplai` |
    | `SIMPLAI_BASE_URL` | optional, defaults to `https://edge-service.simplai.ai` |
    | `ANTHROPIC_API_KEY` | for **Check images** (Claude vision); without it only the measured checks run |
@@ -66,6 +68,11 @@ export, so the sheet must be shared as "Anyone with the link can view"; otherwis
 The app matches the SKU and rewritten title / bullets / description columns (you can adjust the mapping),
 merges the rewrites into the original listings CSV, offers the merged CSV for download, and sends it to the
 agent to score again, showing before → after.
+
+## Agent in use
+The card at the bottom of the sidebar shows the SimplAI agent every request goes to (`GET /api/agent`): agent ID,
+tenant, user, device, API host and a masked API key, a live check against the SimplAI backend, plus this chat's
+conversation ID, the audit run_id and each tool the agent called (audit-file, sku-report, …) with its arguments.
 
 ## Run locally
 ```bash
