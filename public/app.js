@@ -1342,7 +1342,10 @@ const REWRITE_FIELDS = [
   ['bullet_3', 'Bullet 3', /bullet\s*0?3\b|\bb3\b/], ['bullet_4', 'Bullet 4', /bullet\s*0?4\b|\bb4\b/],
   ['bullet_5', 'Bullet 5', /bullet\s*0?5\b|\bb5\b/],
   ['description', 'Description', /descr/],
+  ['image_urls', 'Image URLs', /image\s*urls?\b/],
 ];
+// Columns the agent adds to its review sheet; never listing text.
+const META_COLS = /rule|reason|note|length|count|score|plan|log|confirm|instruction|tab|status|change|before|after/;
 const NEW_WORDS = /(new|rewrit|propos|revis|suggest|updat|after|complian|final|approv|recommend)/;
 const OLD_WORDS = /(orig|old|current|before|existing|source)/;
 const norm = (h) => String(h).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -1399,7 +1402,7 @@ function guessMapping(headers, rows) {
   // Wide layout: one column per field, prefer the rewritten one.
   const map = {};
   for (const [key, , re] of REWRITE_FIELDS) {
-    const cands = headers.filter((h, i) => re.test(H[i]) && !/rule|reason|note|length|count|score/.test(H[i]));
+    const cands = headers.filter((h, i) => re.test(H[i]) && !META_COLS.test(H[i].replace(/^(rewritten|new|proposed|revised|updated|final|approved) /, '')));
     const pick = cands.find(h => NEW_WORDS.test(norm(h)) && !OLD_WORDS.test(norm(h)))
       || (cands.length === 1 && !OLD_WORDS.test(norm(cands[0])) ? cands[0] : null);
     map[key] = pick || '';
@@ -1490,20 +1493,30 @@ async function rescoreFromCsv(sheetText, sourceName) {
     let header, merged;
     if (base) {
       header = base.header;
-      merged = base.rows.map(r => rewrites[r.sku_id] ? { ...r, ...rewrites[r.sku_id] } : r);
+      // Only client listings take rewrites; competitors stay exactly as uploaded.
+      const client = (r) => !('is_client' in r) || /^(true|yes|y|1)$/i.test(r.is_client || '');
+      merged = base.rows.map(r => rewrites[r.sku_id] && client(r) ? { ...r, ...rewrites[r.sku_id] } : r);
     } else {
-      header = ['sku_id', 'is_client', ...REWRITE_FIELDS.map(f => f[0])];
-      merged = skus.map(id => ({ sku_id: id, is_client: 'TRUE', ...rewrites[id] }));
+      // No original CSV in this chat: use the sheet's own listing columns.
+      const LISTING = ['sku_id', 'is_client', 'competitor_group', 'brand', 'category', ...REWRITE_FIELDS.map(f => f[0])];
+      header = LISTING.filter(c => c === 'sku_id' || headers.includes(c) || REWRITE_FIELDS.some(f => f[0] === c));
+      merged = skus.map(id => {
+        const src = rows.find(x => (x[m.skuCol] || '').trim() === id) || {};
+        return { ...Object.fromEntries(LISTING.map(c => [c, src[c] ?? ''])), sku_id: id, is_client: src.is_client || 'TRUE', ...rewrites[id] };
+      });
     }
-    const matched = base ? skus.filter(id => base.rows.some(r => r.sku_id === id)) : skus;
-    return { rewrites, skus, matched, fields, header, merged };
+    const isClient = (id) => { const row = merged.find(x => x.sku_id === id); return !row || !('is_client' in row) || /^(true|yes|y|1)$/i.test(row.is_client); };
+    const matched = (base ? skus.filter(id => base.rows.some(r => r.sku_id === id)) : skus).filter(isClient);
+    const missing = base ? skus.filter(id => !base.rows.some(r => r.sku_id === id)) : [];
+    const usedFields = [...new Set(matched.flatMap(id => Object.keys(rewrites[id])))];
+    return { rewrites, skus, matched, missing, fields: usedFields, header, merged };
   };
   const refresh = () => {
     const r = build();
     go.disabled = dl.disabled = !!r.error || !r.matched.length;
     status.innerHTML = r.error ? esc(r.error)
       : `Rewrites for <b>${r.matched.length}</b> SKU${r.matched.length === 1 ? '' : 's'} (${esc(r.matched.join(', '))}) · fields: ${esc(r.fields.map(f => REWRITE_FIELDS.find(x => x[0] === f)?.[1] || f).join(', '))}`
-        + (base && r.skus.length > r.matched.length ? ` · <span class="flow-warn-inline">${r.skus.length - r.matched.length} SKU(s) not in your listings CSV</span>` : '');
+        + (r.missing.length ? ` · <span class="flow-warn-inline">${r.missing.length} SKU${r.missing.length === 1 ? '' : 's'} not in your listings CSV (${esc(r.missing.slice(0, 3).join(', '))}${r.missing.length > 3 ? '…' : ''})</span>` : '');
   };
   form.addEventListener('change', refresh);
   refresh();
