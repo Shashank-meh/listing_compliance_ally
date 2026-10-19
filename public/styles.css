@@ -498,3 +498,33 @@ html { color-scheme: light; }
 body { background: #ffffff; }
 .sidebar { background: #fafafb; border-right: 1px solid var(--border); }
 .panel { background: #ffffff; }
+
+/* ---- Autopilot bar ---- */
+.autobar { display: flex; align-items: center; gap: 10px; padding: 7px 20px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 13px; min-height: 42px; }
+.autobar.hidden { display: none; }
+.auto-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.autobar.running .auto-dot { background: var(--accent); animation: autoPulse 1.4s ease-in-out infinite; }
+.autobar.paused .auto-dot { background: #d97706; }
+.autobar.finished .auto-dot { background: var(--ok); }
+@keyframes autoPulse { 50% { opacity: .35; } }
+.auto-step { font-weight: 600; white-space: nowrap; }
+.auto-step:empty { display: none; }
+.auto-text { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.autobar.paused .auto-text { color: #b45309; }
+.auto-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.auto-actions .btn { padding: 4px 10px; font-size: 12.5px; }
+.auto-actions .btn.hidden { display: none; }
+.auto-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; cursor: pointer; margin-left: 4px; user-select: none; }
+.auto-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.auto-switch .track { width: 30px; height: 17px; border-radius: 999px; background: #cbd5e1; position: relative; transition: background .15s; }
+.auto-switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.auto-switch input:checked + .track { background: var(--accent); }
+.auto-switch input:checked + .track::after { transform: translateX(13px); }
+.auto-switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stepper li.skipped button { color: var(--muted); text-decoration: line-through; opacity: .8; }
+.stepper li.skipped button::before { content: '↷'; }
+@media (max-width: 760px) {
+  .autobar { flex-wrap: wrap; padding: 7px 16px; }
+  .auto-text { flex-basis: 100%; order: 5; white-space: normal; }
+}
+.how-auto { margin: 10px 0 0; text-align: center; }

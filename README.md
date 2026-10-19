@@ -54,6 +54,12 @@ progress and runs a step when clicked; after each reply the next step is offered
 brand the rewritten CSV with before → after scores, the confirm-with-brand items and the review sheet link.
 **Upload to Amazon** is shown as coming soon.
 
+**Autopilot** (on by default, switch in the bar under the stepper) runs the whole journey after an upload:
+it audits all client SKUs, deep-dives each one (up to 5), benchmarks, rewrites, re-scores from the review
+sheet and opens the approval email. **Skip step** moves on, clicking a step in the stepper jumps there
+(earlier steps that never ran are marked skipped), and **Pause** holds it. It pauses itself on an error, an
+unreadable sheet, or a reply it can't read, and stops at the approval email, which needs the brand's address.
+
 ## Re-score from the review sheet
 When the agent shares a Google Sheet, **Re-score from sheet** reads it (`lib/sheets.js`, via Google's CSV
 export, so the sheet must be shared as "Anyone with the link can view"; otherwise upload the sheet as CSV).

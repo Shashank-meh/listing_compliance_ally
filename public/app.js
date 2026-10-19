@@ -28,6 +28,8 @@ const state = {
   asked: new Set(),
   ruleCounts: new Map(),
   score: null,
+  skipped: new Set(),
+  autoQueue: [],
 };
 
 // ---------- response parsing (tolerant of unknown shapes) ----------
@@ -654,11 +656,13 @@ async function run(text, view) {
     if (isNew) loadHistory();
     await poll(cId, mId, view, text, startedAt, ctrl);
   } catch (err) {
-    if (err.name === 'AbortError') view.card.innerHTML = '<span class="muted">Stopped waiting for a reply.</span>';
-    else showError(view, err, { label: 'Try again', fn: () => run(text, view) });
+    if (err.name === 'AbortError' && state.autoSkipping) view.card.innerHTML = '<span class="muted">Skipped.</span>';
+    else if (err.name === 'AbortError') { view.card.innerHTML = '<span class="muted">Stopped waiting for a reply.</span>'; autoPause('You stopped the request'); }
+    else { showError(view, err, { label: 'Try again', fn: () => run(text, view) }); autoPause(err.message); }
   } finally {
     state.abort = null;
     setBusy(false);
+    if (state.autoSkipping) { state.autoSkipping = false; autoContinue(); }
   }
 }
 
@@ -676,15 +680,18 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
         rememberRunId(reply, r.data);
         if (state.pendingStep && reply) { markDone(state.pendingStep); state.pendingStep = null; }
         const ctx = state.expectSummary; state.expectSummary = null; state.thinkingLabel = null;
-        if (!(ctx && reply && renderSummary(view, reply, ctx, r.data))) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
+        const summarised = Boolean(ctx && reply && renderSummary(view, reply, ctx, r.data));
+        if (!summarised) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
         addSheetLinks(view, r.data, reply);
         state.agentFollowups = turn?.followups || [];
         scrollDown();
+        autoAfterReply(reply, ctx && !summarised);
         return;
       }
       await sleep(POLL_INTERVAL_MS, ctrl.signal);
     }
     clearInterval(tick);
+    autoPause('The agent didn’t reply within 3 minutes');
     showError(view, new Error('No reply after 3 minutes.'), {
       label: 'Keep waiting',
       fn: async () => {
@@ -811,6 +818,7 @@ function reset() {
   state.runId = null;
   state.done = new Set(); state.pendingStep = null; state.auditPicked = null;
   state.originalScores = null; state.rescoredScores = null; state.rewrittenCsv = null; state.brandNotes = null;
+  autoReset();
   renderStepper();
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
@@ -836,7 +844,11 @@ function init() {
   const startAudit = () => { state.pendingFlow = true; $('#fileInput').value = ''; $('#fileInput').click(); };
   $('#startAudit').onclick = (e) => { e.stopPropagation(); startAudit(); };
   $('#dropzone').onclick = startAudit;
-  $('#stepper').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b && !b.disabled) runStep(b.dataset.step); });
+  $('#stepper').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b && !b.disabled) autoJump(b.dataset.step); });
+  $('#autoSkip').onclick = autoSkip;
+  $('#autoPause').onclick = () => (state.autoPaused ? autoResume() : autoPause('Press Resume to carry on'));
+  $('#autoToggle').checked = autoOn();
+  $('#autoToggle').onchange = (e) => autoSetOn(e.target.checked);
   $('#trySample').onclick = async () => {
     try {
       const res = await fetch('/sample-listings.csv');
@@ -878,6 +890,7 @@ function init() {
     const v = input.value;
     if (!v.trim() || state.busy) return;
     input.value = ''; grow();
+    if (autoActive()) autoPause('Paused while you chat');
     send(v);
   });
   $('#stop').onclick = () => state.abort?.abort();
@@ -1110,6 +1123,7 @@ async function flowUpload(file) {
   v.card.innerHTML = '';
   v.card.appendChild(md);
   scrollDown();
+  if (clients.length) autoStart(); else autoPause('No client SKUs in this file');
 }
 
 async function flowAudit(picked, label, opts = {}) {
@@ -1380,12 +1394,14 @@ async function rescoreFromSheet(url) {
       row.append(up, retry);
       box.appendChild(row);
       v.card.appendChild(box);
+      autoPause('Couldn’t read the review sheet. Share it as “Anyone with the link”, upload it as CSV, or skip');
       return;
     }
     v.m.remove();
     await rescoreFromCsv(body.csv, 'review sheet');
   } catch (err) {
     showError(v, err);
+    autoPause(err.message);
   }
 }
 
@@ -1518,6 +1534,11 @@ async function rescoreFromCsv(sheetText, sourceName) {
   };
   form.addEventListener('change', refresh);
   refresh();
+  // Autopilot re-scores straight away when the columns were recognised.
+  if (autoActive() && state.autoAwait === 'rescore') {
+    if (go.disabled) autoPause('Pick the sheet columns that hold the rewrites, then press Re-score');
+    else autoStatus('Re-scoring the rewritten listings…', setTimeout(() => go.isConnected && !go.disabled && go.click(), AUTO_DELAY_MS));
+  }
 
   const csvOf = (r) => [r.header.map(cell).join(','), ...r.merged.map(row => r.header.map(h => cell(row[h])).join(','))].join('\n');
   const mergedName = () => `${(base?.name || 'listings.csv').replace(/\.csv$/i, '')}-rewritten.csv`;
@@ -1569,9 +1590,11 @@ const auditLabel = () => state.auditPicked?.label || 'the audited SKUs';
 const benchmarkPrompt = () => `Benchmark ${auditLabel()} against the competitor median${DETAIL_MARK}score, image count, headed bullets, description length, title length and critical violations for each client SKU.`;
 const rewritePrompt = () => `Rewrite ${auditLabel()}${DETAIL_MARK}a compliant title, 5 bullets and description for each client SKU, with the rule ID for every change, and save it to the review sheet.`;
 
+const finished = (key) => Boolean(state.done?.has(key) || state.skipped?.has(key));
+
 function nextStep() {
   if (!state.done?.has('audit')) return null;
-  return STEPS.find(s => !state.done.has(s.key)) || null;
+  return STEPS.find(s => !finished(s.key)) || null;
 }
 
 function markDone(key) {
@@ -1594,14 +1617,16 @@ function renderStepper() {
   if (!bar) return;
   const d = state.done || new Set();
   bar.classList.toggle('hidden', !d.size && !state.flow);
-  const current = STEPS.find(s => !d.has(s.key))?.key;
+  const current = STEPS.find(s => !finished(s.key))?.key;
   bar.querySelectorAll('[data-step]').forEach(b => {
     const k = b.dataset.step;
     b.parentElement.classList.toggle('done', d.has(k));
+    b.parentElement.classList.toggle('skipped', !d.has(k) && Boolean(state.skipped?.has(k)));
     b.parentElement.classList.toggle('current', k === current);
     b.disabled = !stepAvailable(k) || state.busy;
-    b.title = d.has(k) ? 'Done · click to run again' : stepAvailable(k) ? 'Click to run this step' : k === 'rescore' ? 'Rewrite first: re-scoring reads the review sheet' : 'Run the audit first';
+    b.title = d.has(k) ? 'Done · click to run again' : state.skipped?.has(k) ? 'Skipped · click to run it' : stepAvailable(k) ? 'Click to run this step' : k === 'rescore' ? 'Rewrite first: re-scoring reads the review sheet' : 'Run the audit first';
   });
+  renderAutobar();
 }
 
 function runStep(key) {
@@ -1621,6 +1646,192 @@ function runStep(key) {
     state.pendingSheet = true; $('#fileInput').value = ''; $('#fileInput').click(); return;
   }
   if (key === 'approve') return openApproval();
+}
+
+// ---------- autopilot ----------
+// After an upload, Autopilot runs every step in order: audit all client SKUs,
+// deep-dive each, benchmark, rewrite, re-score from the review sheet, then
+// opens the approval email. The user can skip a step, jump to any step in the
+// stepper, pause, or switch it off. It pauses itself whenever a step needs a
+// person (an error, an unreadable sheet, the brand's email address).
+const AUTO_DELAY_MS = 900;
+const MAX_AUTO_DEEPDIVES = 5;
+const AUTO_FAIL_RE = /load_error|nothing to score|could(?:n['’]t| not) (?:load|find|read|access|open)|tool (?:call )?failed|error (?:loading|calling)/i;
+const AUTO_DOING = {
+  audit: 'Auditing every client SKU', deepdive: 'Deep-diving', benchmark: 'Benchmarking against competitors',
+  rewrite: 'Rewriting the listings', rescore: 'Re-scoring the rewrite', approve: 'Preparing the approval email',
+};
+
+function autoOn() { try { return localStorage.getItem('ally.autopilot') !== 'off'; } catch { return true; } }
+const autoActive = () => autoOn() && Boolean(state.flow) && !state.autoPaused && !state.autoFinished;
+
+function autoSetOn(on) {
+  try { localStorage.setItem('ally.autopilot', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
+  clearTimeout(state.autoTimer);
+  state.autoPaused = false; state.autoReason = '';
+  if (on) autoContinue(); else renderAutobar();
+}
+
+function autoReset() {
+  clearTimeout(state.autoTimer);
+  Object.assign(state, { autoTimer: null, autoPaused: false, autoReason: '', autoFinished: false, autoAwait: null, autoQueue: [], autoSkipping: false, autoText: '', skipped: new Set() });
+}
+
+function autoStatus(text, timer) {
+  clearTimeout(state.autoTimer);
+  state.autoTimer = timer || null;
+  state.autoText = text;
+  renderAutobar();
+}
+
+function autoPause(reason) {
+  if (!autoOn() || !state.flow || state.autoFinished) return;
+  clearTimeout(state.autoTimer);
+  state.autoPaused = true;
+  state.autoReason = reason || 'Paused';
+  renderAutobar();
+}
+
+function autoResume() {
+  state.autoPaused = false; state.autoReason = '';
+  autoContinue();
+}
+
+// Upload done: pick "All / Both" and go.
+function autoStart() {
+  autoReset();
+  if (!autoOn()) return renderAutobar();
+  const all = document.querySelectorAll('.flow-choice.primary:not(:disabled)');
+  const primary = all[all.length - 1];
+  state.autoAwait = 'audit';
+  autoStatus('Starting the audit of every client SKU…', setTimeout(() => {
+    if (!autoActive() || state.busy) return;
+    if (primary?.isConnected && !primary.disabled) primary.click(); else runStep('audit');
+  }, AUTO_DELAY_MS));
+}
+
+// Called once a reply has been shown. Moves on, or pauses if the step failed.
+function autoAfterReply(reply, unreadSummary) {
+  state.autoSkipping = false;
+  if (!autoActive()) return renderAutobar();
+  const awaited = state.autoAwait;
+  // A failed step stays current: Resume runs it again, Skip moves past it.
+  const failed = (reason) => {
+    if (awaited && awaited !== 'audit') { state.done.delete(awaited); state.autoQueue = []; renderStepper(); }
+    autoPause(reason);
+  };
+  if (!reply) return failed('The agent returned an empty reply. Resume to try again, or skip');
+  if (AUTO_FAIL_RE.test(reply)) return failed('The agent reported a problem. Resume to try again, or skip');
+  if (unreadSummary) return failed('Couldn’t read the scores in the agent’s reply. Resume to try again, or ask Ally');
+  if (awaited && !finished(awaited) && !state.autoQueue.length) return autoPause(`${STEP_NAME[awaited]} didn’t finish`);
+  // The request is still marked busy until run() unwinds.
+  setTimeout(autoContinue, 0);
+}
+
+const STEP_NAME = { upload: 'Upload', audit: 'Audit', deepdive: 'Deep-dive', benchmark: 'Benchmark', rewrite: 'Rewrite', rescore: 'Re-score', approve: 'Approve' };
+
+function autoContinue() {
+  if (!autoActive() || state.busy) return renderAutobar();
+  if (!state.done?.has('audit')) {
+    if (state.done?.has('upload')) return autoStart();
+    return renderAutobar();
+  }
+  // More SKUs left to deep-dive?
+  if (state.autoQueue?.length) {
+    const c = state.autoQueue[0];
+    return autoStatus(`Next: deep-dive ${c.brand}…`, setTimeout(() => {
+      if (!autoActive() || state.busy) return;
+      state.autoQueue.shift();
+      state.autoAwait = 'deepdive';
+      send(deepDivePrompt(c.sku_id, c.brand));
+    }, AUTO_DELAY_MS));
+  }
+  const next = nextStep();
+  if (!next) { state.autoFinished = true; state.autoText = ''; return renderAutobar(); }
+  autoStatus(`Next: ${next.cta}…`, setTimeout(() => autoRun(next.key), AUTO_DELAY_MS));
+}
+
+function autoRun(key) {
+  if (!autoActive() || state.busy) return;
+  state.autoAwait = key;
+  state.autoText = '';
+  if (key === 'deepdive') {
+    const clients = (state.auditPicked?.picked || state.flow?.clients || []).slice(0, MAX_AUTO_DEEPDIVES);
+    state.autoQueue = clients.slice(1);
+  }
+  if (key === 'rescore' && !state.lastSheet) {
+    if (state.skipped.has('rewrite')) { state.skipped.add('rescore'); renderStepper(); return autoContinue(); }
+    return autoPause('The rewrite didn’t return a review sheet. Upload the sheet as CSV (Re-score in the stepper) or skip');
+  }
+  runStep(key);
+  if (key === 'approve') {
+    // Sending needs the brand's email address, so Autopilot ends here.
+    state.autoFinished = true;
+    renderAutobar();
+  }
+}
+
+// The step Autopilot is on (or about to start).
+const autoTarget = () => (state.busy || state.autoQueue?.length ? state.autoAwait : null) || nextStep()?.key || state.autoAwait;
+
+function autoSkip() {
+  const key = autoTarget();
+  if (!key || key === 'upload' || key === 'audit') return;
+  clearTimeout(state.autoTimer);
+  state.skipped.add(key);
+  state.autoQueue = [];
+  state.autoAwait = null;
+  state.pendingStep = null; state.expectSummary = null;
+  state.autoPaused = false; state.autoReason = '';
+  renderStepper();
+  // A request in flight is abandoned; run() continues once it has unwound.
+  if (state.busy && state.abort) { state.autoSkipping = true; state.abort.abort(); return; }
+  autoContinue();
+}
+
+// A click on a step runs it now; steps before it that never ran count as skipped.
+function autoJump(key) {
+  clearTimeout(state.autoTimer);
+  state.autoQueue = [];
+  if (autoOn() && state.done?.has('audit')) {
+    for (const s of STEPS.slice(STEPS.findIndex(x => x.key === 'deepdive'), STEPS.findIndex(x => x.key === key))) {
+      if (!state.done.has(s.key)) state.skipped.add(s.key);
+    }
+    state.skipped.delete(key);
+    state.autoPaused = false; state.autoReason = ''; state.autoFinished = false;
+    renderStepper();
+  }
+  if (autoOn() && key !== 'upload' && key !== 'audit') return autoRun(key);
+  state.autoAwait = key;
+  runStep(key);
+}
+
+function renderAutobar() {
+  const bar = $('#autobar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !state.flow);
+  if (!state.flow) return;
+  const on = autoOn();
+  const target = autoTarget();
+  const n = STEPS.findIndex(s => s.key === target) + 1;
+  let text;
+  if (!on) text = 'Autopilot is off. Pick a step above or a suggestion below.';
+  else if (state.autoFinished) text = state.done?.has('approve') ? 'All steps done.' : 'Ready for approval. Add the brand’s email below and send.';
+  else if (state.autoPaused) text = `Paused · ${state.autoReason}`;
+  else if (state.busy && target) {
+    const left = state.autoQueue?.length;
+    text = `${AUTO_DOING[target] || STEP_NAME[target]}${target === 'deepdive' && left ? ` (${left} more after this)` : ''}…`;
+  } else text = state.autoText || 'Running…';
+  bar.className = `autobar${!on ? ' off' : state.autoPaused ? ' paused' : state.autoFinished ? ' finished' : ' running'}`;
+  $('#autoStep').textContent = on && !state.autoFinished && n > 0 ? `Step ${n} of ${STEPS.length}` : '';
+  $('#autoText').textContent = text;
+  $('#autoToggle').checked = on;
+  const skip = $('#autoSkip'), pause = $('#autoPause');
+  skip.classList.toggle('hidden', !on || state.autoFinished);
+  skip.disabled = !target || target === 'upload' || target === 'audit';
+  skip.title = skip.disabled ? 'The audit is needed for every later step' : `Skip ${STEP_NAME[target]} and go to the next step`;
+  pause.classList.toggle('hidden', !on || state.autoFinished);
+  pause.textContent = state.autoPaused ? 'Resume' : 'Pause';
 }
 
 // ---------- approval email ----------

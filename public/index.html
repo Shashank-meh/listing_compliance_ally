@@ -47,6 +47,16 @@
           </button>
         </div>
       </header>
+      <div class="autobar hidden" id="autobar" role="status" aria-live="polite">
+        <span class="auto-dot" aria-hidden="true"></span>
+        <span class="auto-step" id="autoStep"></span>
+        <span class="auto-text" id="autoText"></span>
+        <div class="auto-actions">
+          <button class="btn" id="autoSkip" type="button">Skip step</button>
+          <button class="btn" id="autoPause" type="button">Pause</button>
+          <label class="auto-switch" title="Run every step automatically after an upload"><input type="checkbox" id="autoToggle"><span class="track"></span>Autopilot</label>
+        </div>
+      </div>
 
       <section class="thread" id="thread">
         <div class="welcome" id="welcome">
@@ -69,6 +79,7 @@
             <li><span class="how-n">6</span><div><b>Re-score</b><span>Score the rewrite and see before → after.</span></div></li>
             <li><span class="how-n">7</span><div><b>Approve</b><span>Email the brand the new CSV, or upload to Amazon (soon).</span></div></li>
           </ol>
+          <p class="muted small how-auto"><b>Autopilot</b> runs all seven steps for you after the upload. Skip a step, jump to any step in the top bar, or pause it at any time.</p>
           <details class="columns-help">
             <summary>Which columns does the CSV need?</summary>
             <p><code>sku_id</code>, <code>is_client</code> (TRUE/FALSE), <code>competitor_group</code>, <code>brand</code>, <code>title</code>, <code>bullet_1</code>–<code>bullet_5</code>, <code>description</code>, <code>image_urls</code> (separated by <code>|</code>). <a href="/sample-listings.csv" download>Download the sample</a> to use as a template.</p>
