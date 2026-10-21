@@ -373,10 +373,10 @@ function renderAttachment() {
   box.classList.toggle('hidden', !f);
   const dz = $('#dropzone');
   dz.classList.toggle('has-file', !!f);
-  $('#dropzoneTitle').textContent = f ? `${f.name} · ${f.rows} listings` : 'Drop your listings CSV here';
+  $('#dropzoneTitle').textContent = f ? `${f.name} · ${f.rows} listings` : 'Drop your listings CSV';
   $('#dropzoneSub').textContent = f
     ? 'Ready. Start the audit, or type your own question below.'
-    : 'Columns: sku_id, is_client, competitor_group, title, bullet_1–5, description, image_urls';
+    : 'Client SKUs and their competitors';
   if (f) box.appendChild(fileChip(f.name, `${f.rows} listings`, () => { state.file = null; renderAttachment(); }));
 }
 
@@ -808,7 +808,7 @@ async function loadHistory() {
     const r = await api('/api/conversations?size=30');
     const items = findArray(r.data);
     list.innerHTML = '';
-    if (!items.length) { list.innerHTML = '<li class="muted small">No conversations yet.</li>'; return; }
+    if (!items.length) { list.innerHTML = '<li class="muted small">No audits yet.</li>'; return; }
     for (const it of items) {
       const id = findKey(it, ID_KEYS.conv) || (it.id != null ? String(it.id) : null);
       if (!id) continue;

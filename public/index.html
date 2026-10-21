@@ -23,7 +23,7 @@
         </div>
       </div>
       <div class="side-label">
-        <span>Recent conversations</span>
+        <span>Recent audits</span>
         <button class="icon-btn" id="refreshHistory" title="Refresh">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
         </button>
@@ -66,29 +66,24 @@
       <section class="thread" id="thread">
         <div class="welcome" id="welcome">
           <h1>Audit your Amazon listings</h1>
-          <p class="muted">Check your client listings against Amazon's content rules, see how they compare with competitors, and get compliant rewrites you can approve.</p>
+          <p class="muted lede">Score, benchmark and rewrite listings against Amazon's content rules.</p>
           <div class="dropzone" id="dropzone" role="button" tabindex="0">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-            <span class="dz-text"><b id="dropzoneTitle">Drop your listings CSV here</b><span class="muted" id="dropzoneSub">One row per listing: your client SKUs and their competitors</span></span>
+            <span class="dz-text"><b id="dropzoneTitle">Drop your listings CSV</b><span class="muted" id="dropzoneSub">Client SKUs and their competitors</span></span>
             <button class="btn btn-primary start" id="startAudit" type="button">Start audit</button>
           </div>
-          <p class="sample-line muted small">No file yet? <button class="link-btn" id="trySample" type="button">Try it with sample data</button> · 2 client brands, 6 competitors</p>
+          <p class="sample-line muted small"><button class="link-btn" id="trySample" type="button">Try sample data</button> · <a href="/sample-listings.csv" download title="Columns: sku_id, is_client, competitor_group, brand, title, bullet_1–5, description, image_urls (| separated)">CSV template</a></p>
 
-          <h2 class="how-title">How it works</h2>
-          <ol class="how how7">
-            <li><span class="how-n">1</span><div><b>Upload</b><span>Your listings CSV: client SKUs and their competitors.</span></div></li>
-            <li><span class="how-n">2</span><div><b>Audit</b><span>Pick brands; each SKU is scored against 29 Amazon rules.</span></div></li>
-            <li><span class="how-n">3</span><div><b>Deep-dive</b><span>Every finding for a SKU, with the rule it breaks.</span></div></li>
-            <li><span class="how-n">4</span><div><b>Benchmark</b><span>How each SKU compares with its competitors.</span></div></li>
-            <li><span class="how-n">5</span><div><b>Rewrite</b><span>Compliant copy saved to a review sheet.</span></div></li>
-            <li><span class="how-n">6</span><div><b>Re-score</b><span>Score the rewrite and see before → after.</span></div></li>
-            <li><span class="how-n">7</span><div><b>Approve</b><span>Email the brand the new CSV, or upload to Amazon (soon).</span></div></li>
+          <ol class="steps-line" aria-label="Steps">
+            <li title="Your listings CSV: client SKUs and their competitors">Upload</li>
+            <li title="Each client SKU is scored against 29 Amazon rules">Audit</li>
+            <li title="Every finding for a SKU, with the rule it breaks">Deep-dive</li>
+            <li title="How each SKU compares with its competitors">Benchmark</li>
+            <li title="Compliant copy saved to a review sheet">Rewrite</li>
+            <li title="Score the rewrite: before → after">Re-score</li>
+            <li title="Email the brand the new CSV, or upload to Amazon (soon)">Approve</li>
           </ol>
-          <p class="muted small how-auto"><b>Autopilot</b> runs all seven steps for you after the upload. Skip a step, jump to any step in the top bar, or pause it at any time.</p>
-          <details class="columns-help">
-            <summary>Which columns does the CSV need?</summary>
-            <p><code>sku_id</code>, <code>is_client</code> (TRUE/FALSE), <code>competitor_group</code>, <code>brand</code>, <code>title</code>, <code>bullet_1</code>–<code>bullet_5</code>, <code>description</code>, <code>image_urls</code> (separated by <code>|</code>). <a href="/sample-listings.csv" download>Download the sample</a> to use as a template.</p>
-          </details>
+          <p class="muted small auto-note"><span class="bolt" aria-hidden="true">⚡</span> Autopilot runs every step after upload. Skip, pause or jump anytime.</p>
         </div>
       </section>
 

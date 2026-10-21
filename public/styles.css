@@ -692,3 +692,14 @@ body { background: #ffffff; }
 .ip-list li.warn::before { content: '!'; width: 13px; height: 13px; top: .3em; left: 0; display: grid; place-items: center; font-size: 9.5px; font-weight: 800; color: #fff; background: #f59e0b; }
 .ip-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .ip-foot { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); font-style: italic; }
+
+/* ---- Cleaner start screen ---- */
+.welcome .lede { margin: 0 0 22px; }
+.sample-line a { color: var(--accent-text); font-weight: 550; text-decoration: none; }
+.sample-line a:hover { text-decoration: underline; }
+.steps-line { list-style: none; margin: 36px 0 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; counter-reset: st; font-size: 13px; }
+.steps-line li { counter-increment: st; display: inline-flex; align-items: center; gap: 6px; color: var(--text); cursor: default; }
+.steps-line li::before { content: counter(st); width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--accent-soft); color: var(--accent-text); }
+.steps-line li:not(:last-child)::after { content: ''; width: 18px; height: 1px; background: var(--border); margin: 0 4px 0 6px; }
+.auto-note { margin: 16px 0 0; }
+.auto-note .bolt { color: var(--accent); }
