@@ -145,7 +145,11 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
 });
 
 // ---------- rendering ----------
+// "Google Sheet link: none returned…" lines say nothing useful: drop them.
+const NO_SHEET_RE = /^[ \t>*_-]*(?:\*\*)?(?:google )?(?:sheet|spreadsheet)(?: link| url)?(?:\*\*)?\s*[:\-–]\s*(?:\*\*)?\s*(?:none|n\/a|not (?:returned|available|provided)|no (?:link|sheet|url))\b.*$\n?/gim;
+
 function renderMarkdown(text) {
+  text = String(text).replace(NO_SHEET_RE, '');
   let html;
   if (window.marked && window.DOMPurify) {
     html = DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }), { ADD_TAGS: ['ins'] });
@@ -693,7 +697,7 @@ async function send(text, opts = {}) {
   // A message that performs a journey step completes it when the reply arrives.
   state.pendingStep = state.pendingStep || stepForPrompt(text);
   // Report and rewrite tools need the audit's run_id; the agent only sees it if we pass it on.
-  if (state.runId && !/run_id/i.test(text)) text += `${RUN_MARK}${state.runId} for any report or rewrite tool, and include any Google Sheet link a tool returns.`;
+  if (state.runId && !/run_id/i.test(text)) text += `${RUN_MARK}${state.runId} for any report or rewrite tool. If a tool returns a Google Sheet link, include it; if not, don't mention a sheet.`;
   state.asked.add(text);
   if (state.file) {
     const f = state.file;
