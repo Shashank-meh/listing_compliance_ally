@@ -762,6 +762,8 @@ async function poll(cId, mId, view, userText, startedAt, ctrl) {
         const summarised = Boolean(ctx && reply && renderSummary(view, reply, ctx, r.data));
         if (!summarised) fillBot(view, reply || '_The agent returned an empty reply._', r.data, turn?.steps || []);
         addSheetLinks(view, r.data, reply);
+        // Audit, report and rewrite tools save to a sheet: if the reply carried no link, check the history.
+        if (!view.card.querySelector('a.sheet-link') && /^(Audit|Re-score|Deep-dive|Rewrite|Benchmark|Show the compliant rewrite)/i.test(userText)) await sheetFromHistory(cId, view);
         state.agentFollowups = turn?.followups || [];
         scrollDown();
         autoAfterReply(reply, ctx && !summarised);
@@ -900,6 +902,7 @@ function reset() {
   state.originalScores = null; state.rescoredScores = null; state.rewrittenCsv = null; state.brandNotes = null;
   autoReset();
   state.toolLog = [];
+  state.sheetsShown = new Set(); state.lastSheet = null;
   renderStepper();
   renderAttachment();
   $('#thread').querySelectorAll('.msg').forEach(n => n.remove());
@@ -1544,20 +1547,48 @@ const tidyNum = (v) => /^-?\d+\.0+$/.test(String(v).trim()) ? String(v).trim().r
 // The agent's report and rewrite tools return a Google Sheet. The link may
 // sit in the tool output or attachments rather than the reply text, so look
 // through the whole response and show any sheet the message doesn't already.
-const SHEET_RE = /https:\/\/docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})[^\s"'<>)\]\\]*/g;
+const SHEET_RE = /https:\/\/docs\.google\.com\/spreadsheets\/(?:u\/\d+\/)?d\/([A-Za-z0-9_-]{20,})[^\s"'<>)\]\\]*/g;
+// Tools sometimes return only the spreadsheet's ID.
+const SHEET_ID_RE = /"(?:spreadsheet_?id|sheet_?id|spreadsheetId|sheetId|google_sheet_id)"\s*:\s*"([A-Za-z0-9_-]{30,})"/gi;
 function findSheetLinks(raw) {
   let text;
   try { text = typeof raw === 'string' ? raw : JSON.stringify(raw); } catch { return []; }
-  text = text.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+  // Tool output is often JSON inside JSON: undo every level of escaping.
+  for (let i = 0; i < 4; i++) {
+    const next = text.replace(/\\+\//g, '/').replace(/\\+u0026/gi, '&').replace(/\\+u002f/gi, '/').replace(/\\+u003d/gi, '=').replace(/\\+"/g, '"');
+    if (next === text) break;
+    text = next;
+  }
   const seen = new Map();
-  for (const m of text.matchAll(SHEET_RE)) if (!seen.has(m[1])) seen.set(m[1], m[0].replace(/[.,;:]+$/, ''));
+  // Keyed by sheet and tab: audit and rewrite can write different tabs of one sheet.
+  for (const m of text.matchAll(SHEET_RE)) {
+    const url = m[0].replace(/[.,;:]+$/, '');
+    const key = m[1] + (url.match(/[#&?]gid=(\d+)/)?.[1] ? `#${url.match(/[#&?]gid=(\d+)/)[1]}` : '');
+    if (!seen.has(key)) seen.set(key, url);
+  }
+  for (const m of text.matchAll(SHEET_ID_RE)) if (!seen.has(m[1])) seen.set(m[1], `https://docs.google.com/spreadsheets/d/${m[1]}/edit`);
   return [...seen.entries()].map(([id, url]) => ({ id, url }));
+}
+
+// The reply poll can hold only the agent's final text; the tool output with
+// the sheet link is then only in the conversation history. Look there, in the
+// latest turn, for a sheet this chat hasn't shown yet.
+async function sheetFromHistory(cId, view) {
+  try {
+    const r = await api(`/api/conversation?id=${encodeURIComponent(cId)}`);
+    const msgs = findMessages(r.data);
+    const last = msgs && toTurns(msgs).at(-1);
+    const links = findSheetLinks(last || r.data).filter(l => !state.sheetsShown?.has(l.id));
+    if (links.length) addSheetLinks(view, links.map(l => l.url).join(' '), '');
+  } catch { /* history unavailable: nothing to add */ }
 }
 
 function addSheetLinks(view, raw, replyText) {
   // Only clickable links count as shown (a URL inside a tool step's text doesn't).
   const shown = new Set([...view.card.querySelectorAll('a[href*="docs.google.com/spreadsheets"]')].flatMap(a => findSheetLinks(a.href).map(l => l.id)));
   const links = findSheetLinks(raw).concat(findSheetLinks(replyText || '')).filter(l => !shown.has(l.id) && (shown.add(l.id), true));
+  (state.sheetsShown ||= new Set());
+  shown.forEach(id => state.sheetsShown.add(id));
   if (links.length) {
   const box = el('div', 'sheet-links md');
   for (const l of links) {
