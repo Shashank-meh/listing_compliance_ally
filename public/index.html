@@ -47,6 +47,7 @@
           <li><button data-step="upload">Upload</button></li><li><button data-step="audit">Audit</button></li><li><button data-step="deepdive">Deep-dive</button></li><li><button data-step="benchmark">Benchmark</button></li><li><button data-step="rewrite">Rewrite</button></li><li><button data-step="rescore">Re-score</button></li><li><button data-step="approve">Approve</button></li>
         </ol>
         <div class="topbar-actions">
+          <button class="btn new-audit" id="newAudit" type="button" title="Start a new audit"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>New audit</span></button>
           <button class="icon-btn only-mobile" id="togglePanel" aria-label="Show audit panel">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
           </button>
@@ -59,6 +60,7 @@
         <div class="auto-actions">
           <button class="btn" id="autoSkip" type="button">Skip step</button>
           <button class="btn" id="autoPause" type="button">Pause</button>
+          <button class="btn btn-primary hidden" id="autoNew" type="button">Start a new audit</button>
           <label class="auto-switch" title="Run every step automatically after an upload"><input type="checkbox" id="autoToggle"><span class="track"></span>Autopilot</label>
         </div>
       </div>

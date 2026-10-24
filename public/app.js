@@ -305,7 +305,7 @@ function decorate(root) {
   }
 }
 
-function hideWelcome() { $('#welcome')?.classList.add('hidden'); }
+function hideWelcome() { $('#welcome')?.classList.add('hidden'); document.body.classList.add('in-audit'); }
 function scrollDown() { const t = $('#thread'); t.scrollTop = t.scrollHeight; }
 
 // The CSV is sent as a link (see csvLink); in the thread it shows as a file chip.
@@ -920,6 +920,8 @@ function newChat() {
   try { localStorage.removeItem('ally.conversation'); } catch { /* ignore */ }
   $('#chatTitle').textContent = 'New audit';
   $('#welcome').classList.remove('hidden');
+  document.body.classList.remove('in-audit');
+  window.scrollTo(0, 0);
   document.querySelectorAll('.history button.active').forEach(b => b.classList.remove('active'));
   closeDrawers();
   $('#input').focus();
@@ -934,6 +936,8 @@ function init() {
   $('#dropzone').onclick = startAudit;
   $('#stepper').addEventListener('click', (e) => { const b = e.target.closest('[data-step]'); if (b && !b.disabled) autoJump(b.dataset.step); });
   $('#autoSkip').onclick = autoSkip;
+  $('#newAudit').onclick = newChat;
+  $('#autoNew').onclick = newChat;
   $('#autoPause').onclick = () => (state.autoPaused ? autoResume() : autoPause('Press Resume to carry on'));
   $('#autoToggle').checked = autoOn();
   $('#autoToggle').onchange = (e) => autoSetOn(e.target.checked);
@@ -2104,6 +2108,7 @@ function renderAutobar() {
   skip.title = skip.disabled ? 'The audit is needed for every later step' : `Skip ${STEP_NAME[target]} and go to the next step`;
   pause.classList.toggle('hidden', !on || state.autoFinished);
   pause.textContent = state.autoPaused ? 'Resume' : 'Pause';
+  $('#autoNew').classList.toggle('hidden', !(on && state.autoFinished));
 }
 
 // ---------- agent in use ----------
